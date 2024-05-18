@@ -3,7 +3,7 @@
 The MorphoMapping repository contains the code and raw data used for our ‚xy‘ paper. 
 
 # Description
-![Github (1)](https://github.com/Wguido/MorphoMapping/assets/117764795/78aceb13-a341-4069-b554-58a31668fd69)
+![Github (2)](https://github.com/Wguido/MorphoMapping/assets/117764795/ca1562f4-447d-4503-86ef-7d823fcddc52)
 
 ## Getting Started
 
