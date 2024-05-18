@@ -5,7 +5,7 @@ The MorphoMapping repository contains the code and raw data used for our â€šxyâ€
 # Description
 ![Github (3)](https://github.com/Wguido/MorphoMapping/assets/117764795/213c9b12-6172-46c5-8885-1795ff663074)
 
-## Getting Started
+# Getting Started
 
 ### Dependencies
 * The following Python packages are needed for MorphoMapping:
