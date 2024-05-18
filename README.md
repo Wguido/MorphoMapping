@@ -9,16 +9,17 @@ The MorphoMapping repository contains the code and raw data used for our â€šxyâ€
 
 ### Dependencies
 * The following Python packages are needed for MorphoMapping:
-| First Header  | Second Header |
-| ------------- | ------------- |
-| Content Cell  | Content Cell  |
-| Content Cell  | Content Cell  |
+  
+| Package | Version |
+| --- | --- |
+| `Package` | *V. xy*  |
 
 * The following R libraries  are required for MorphoMapping:
-| First Header  | Second Header |
-| ------------- | ------------- |
-| Content Cell  | Content Cell  |
-| Content Cell  | Content Cell  |
+  
+| Library | Version |
+| --- | --- |
+| `IFC` | *V. XY*  |
+
 ### Installing
 In order to clone the repository run the following command: 
 ```
