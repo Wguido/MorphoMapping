@@ -18,7 +18,7 @@ The MorphoMapping repository contains the code and raw data used for our â€šxyâ€
   
 | Library | Version |
 | --- | --- |
-| `IFC` | *V. XY*  |
+| `IFC` | *V.0.2.1*  |
 
 ### Installing
 In order to clone the repository run the following command: 
