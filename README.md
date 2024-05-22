@@ -28,7 +28,11 @@ The MorphoMapping repository contains the code and raw data used for our â€šxyâ€
   
 | Library | Version |
 | --- | --- |
+| `ggplot2` | *V.0.2.1*  |
+| `ggpubr` | *V.0.2.1*  |
+| `here` | *V.0.2.1*  |
 | `IFC` | *V.0.2.1*  |
+| `rstatix` | *V.0.2.1*  |
 
 ### Installing
 In order to clone the repository run the following command: 
