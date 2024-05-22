@@ -9,7 +9,7 @@ The MorphoMapping repository contains the code and raw data used for our â€šxyâ€
 # Getting Started
 
 ### Dependencies
-* The following Python packages are needed for MorphoMapping:
+* The following Python packages (Python V.3.9.15) are needed for MorphoMapping:
   
 | Package | Version |
 | --- | --- |
