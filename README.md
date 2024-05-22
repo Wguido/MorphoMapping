@@ -24,7 +24,7 @@ The MorphoMapping repository contains the code and raw data used for our â€šxyâ€
 | `scikit-learn` | *1.0.2*  |
 | `umap-learn` | *0.5.5*  |
 
-* The following R libraries  are required for MorphoMapping:
+* The following R libraries (R V.4.2.1)  are required for MorphoMapping:
   
 | Library | Version |
 | --- | --- |
