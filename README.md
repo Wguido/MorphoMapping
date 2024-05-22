@@ -13,7 +13,16 @@ The MorphoMapping repository contains the code and raw data used for our â€šxyâ€
   
 | Package | Version |
 | --- | --- |
-| `Package` | *V. xy*  |
+| `bokeh` | *V. xy*  |
+| `flowkit` | *V. xy*  |
+| `hdbscan` | *V. xy*  |
+| `matplotlib` | *V. xy*  |
+| `numpy` | *V. xy*  |
+| `pandas` | *V. xy*  |
+| `pandas-bokeh` | *V. xy*  |
+| `seaborn` | *V. xy*  |
+| `scikit-learn` | *V. xy*  |
+| `umap-learn` | *V. xy*  |
 
 * The following R libraries  are required for MorphoMapping:
   
