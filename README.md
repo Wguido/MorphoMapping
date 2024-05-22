@@ -13,26 +13,26 @@ The MorphoMapping repository contains the code and raw data used for our â€šxyâ€
   
 | Package | Version |
 | --- | --- |
-| `bokeh` | *V. xy*  |
-| `flowkit` | *V. xy*  |
-| `hdbscan` | *V. xy*  |
-| `matplotlib` | *V. xy*  |
-| `numpy` | *V. xy*  |
-| `pandas` | *V. xy*  |
-| `pandas-bokeh` | *V. xy*  |
-| `seaborn` | *V. xy*  |
-| `scikit-learn` | *V. xy*  |
-| `umap-learn` | *V. xy*  |
+| `bokeh` | *V.2.4.3*  |
+| `flowkit` | *V.0.9.3*  |
+| `hdbscan` | *V.0.8.28*  |
+| `matplotlib` | *V.3.6.2*  |
+| `numpy` | *V.1.22.3*  |
+| `pandas` | *V.1.5.2*  |
+| `pandas-bokeh` | *V.0.5.5*  |
+| `seaborn` | *V.0.12.1*  |
+| `scikit-learn` | *V.1.0.2*  |
+| `umap-learn` | *V.0.5.5*  |
 
 * The following R libraries  are required for MorphoMapping:
   
 | Library | Version |
 | --- | --- |
-| `ggplot2` | *V.0.2.1*  |
-| `ggpubr` | *V.0.2.1*  |
-| `here` | *V.0.2.1*  |
+| `ggplot2` | *V.3.4.4*  |
+| `ggpubr` | *V.0.6.0*  |
+| `here` | *V.1.0.1*  |
 | `IFC` | *V.0.2.1*  |
-| `rstatix` | *V.0.2.1*  |
+| `rstatix` | *V.0.7.2*  |
 
 ### Installing
 In order to clone the repository run the following command: 
