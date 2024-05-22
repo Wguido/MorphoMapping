@@ -38,5 +38,4 @@ The MorphoMapping repository contains the code and raw data used for our â€šxyâ€
 In order to clone the repository run the following command: 
 ```
 https://github.com/Wguido/MorphoMapping.git
-
 ```
