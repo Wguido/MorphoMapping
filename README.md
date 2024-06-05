@@ -2,6 +2,7 @@
 
 The MorphoMapping repository contains the code and raw data used for our ‚xy‘ paper.  
 The framework can be found in the 'MorphoMapping' folder.
+IFC data was acquired through the IDEAS® software.
 
 # Description
 
