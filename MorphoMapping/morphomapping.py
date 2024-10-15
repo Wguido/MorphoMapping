@@ -79,6 +79,8 @@ from bokeh.models import  (HoverTool,
 from bokeh.plotting import figure, show, output_file
 import bokeh
 
+from typing import Optional
+
 bokeh_version = bokeh.__version__
 bokeh_above_three = int(bokeh_version.split(".")[0]) >= 3
 
@@ -331,7 +333,7 @@ class MM:
         for original_value, new_value in rename_values.items():
             self.df[column_name] = self.df[column_name].str.replace(str(original_value), new_value)
 
-    def minmax_norm(self, first_column: str =None, last_column: str =None):
+    def minmax_norm(self, first_column: Optional[str] = None, last_column: str =None):
         """
             Apply MinMax normalization to self.df.
             Specify whether all columns should be normalized by setting parameters.
@@ -375,7 +377,7 @@ class MM:
             self.df = df
 
 
-    def quant_scaler(self, first_column: str =None, last_column: str =None):
+    def quant_scaler(self, first_column: Optional[str] = None, last_column: str =None):
         """
             Apply  QuantileTransformer to self.df.
             Specify whether all columns should be normalized by setting parameters.
