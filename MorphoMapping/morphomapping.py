@@ -103,19 +103,19 @@ class MM:
         self.df = pd.DataFrame()
 
     def convert_to_CSV(self, fcs_path: str, csv_path: str):
-        """
-              Convert FCS.file to CSV.file
+        """\
+        Converts fcs-file to .csv file and saves it to csv_path.
 
-               Parameters
-               ----------
-                   fcs_path : str
-                       path to fcs file
-                   csv_path : str
-                       path to csv file
+        Parameters
+        ----------
+        fcs_path
+           path to fcs file
+        csv_path
+           path to csv file
 
-               Returns
-               ----------
-               None
+        Returns
+        -------
+        None
 
         """
         try:
