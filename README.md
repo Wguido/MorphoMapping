@@ -72,5 +72,3 @@ and run the notebook by entering `jupyter-notebook` into the terminal.
 | `here` | *1.0.1*  |
 | `IFC` | *0.2.1*  |
 | `rstatix` | *0.7.2*  |
-
-
