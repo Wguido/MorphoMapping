@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "morphomapping"
+version = "0.0.1"
+authors = [
+  { name="Amelie Bauerdick", email="Amelie.Bauerdick@stud.uni-heidelberg.de" },
+]
+description = "Analyze ImageStream Data"
+readme = "README.md"
+requires-python = ">=3.9"
+repository = "http://github.com/Wguido/MorphoMapping/"
+keywords = ["analysis", "cytometry", "imaging flow cytometry"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "numpy",
+    "pandas",
+    "matplotlib",
+    "scikit-learn",
+    "umap-learn",
+    "hdbscan", # TODO Check if ambiguous with sklearn implementation.
+    "bokeh",
+]
+
+[project.optional-dependencies]
+docs = [
+    "sphinx<=7.4",
+    "sphinx-book-theme>=1.0.0",
+    "sphinxcontrib-bibtex>=1.0.0",
+    "sphinx-autodoc-typehints",
+    "nbsphinx",
+    "nbsphinx-link",
+    "pandoc",
+    "myst_parser",
+    "docutils<=0.20",
+    "ipython"
+]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[project.urls]
+"Homepage" = "http://github.com/Wguido/MorphoMapping/"
+"BugTracker" = "http://github.com/Wguido/MorphoMapping/"

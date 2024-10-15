@@ -71,10 +71,12 @@ import sklearn.cluster as cluster
 from sklearn.mixture import GaussianMixture
 import umap
 import hdbscan
-from bokeh.models import  HoverTool,  ColumnDataSource,  Range1d, LinearColorMapper,  \
-     CategoricalColorMapper
+from bokeh.models import  (HoverTool,
+                           ColumnDataSource,
+                           Range1d,
+                           LinearColorMapper,
+                           CategoricalColorMapper)
 from bokeh.plotting import figure, show, output_file
-import pandas_bokeh
 
 class MM:
 
