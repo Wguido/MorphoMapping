@@ -21,11 +21,13 @@ classifiers = [
 dependencies = [
     "numpy",
     "pandas",
+    "flowkit",
     "matplotlib",
     "scikit-learn",
     "umap-learn",
     "hdbscan", # TODO Check if ambiguous with sklearn implementation.
     "bokeh",
+    "openpyxl"
 ]
 
 [project.optional-dependencies]

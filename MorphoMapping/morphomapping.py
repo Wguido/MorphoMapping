@@ -77,6 +77,11 @@ from bokeh.models import  (HoverTool,
                            LinearColorMapper,
                            CategoricalColorMapper)
 from bokeh.plotting import figure, show, output_file
+import bokeh
+
+bokeh_version = bokeh.__version__
+bokeh_above_three = int(bokeh_version.split(".")[0]) >= 3
+
 
 class MM:
 
@@ -136,7 +141,7 @@ class MM:
 
     def read_CSV(self, path: str, add_index: bool =False, index_name: str ='Index'):
         """
-          Read CSV file and save it as self.df
+         Read CSV file and save it as self.df
 
             Parameters
             ----------
@@ -789,7 +794,11 @@ class MM:
             for label, field in hover_tooltips
         ])
 
-        return HoverTool(names=["data"], tooltips=hover_tooltips_formatted)
+        hovertool_kwargs = {
+            "name": "data",
+            "tooltips": hover_tooltips_formatted
+        }
+        return HoverTool(**hovertool_kwargs)
 
     def create_base_plot(self, fig_width: int,
                          fig_height: int,
@@ -829,16 +838,30 @@ class MM:
                     plot
 
         """
+        if not bokeh_above_three:
+            plot_kwargs = dict(
+                plot_width=fig_width,
+                plot_height=fig_height,
+                title=fig_title,
+                tools=tools_emb,
+                x_axis_label=label_x,
+                y_axis_label=label_y,
+                x_range=Range1d(start=range_x[0], end=range_x[1]),
+                y_range=Range1d(start=range_y[0], end=range_y[1])
+            )
+        else:
+            plot_kwargs = dict(
+                width=fig_width,
+                height=fig_height,
+                title=fig_title,
+                tools=tools_emb,
+                x_axis_label=label_x,
+                y_axis_label=label_y,
+                x_range=Range1d(start=range_x[0], end=range_x[1]),
+                y_range=Range1d(start=range_y[0], end=range_y[1])
+            )
 
-
-        plot = figure(plot_width=fig_width,
-                      plot_height=fig_height,
-                      title=fig_title,
-                      tools=tools_emb,
-                      x_axis_label=label_x,
-                      y_axis_label=label_y,
-                      x_range=Range1d(start=range_x[0], end=range_x[1]),
-                      y_range=Range1d(start=range_y[0], end=range_y[1]))
+        plot = figure(**plot_kwargs)
 
         # configure title
         plot.title.align = title_align

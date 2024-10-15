@@ -91,7 +91,6 @@ class TestMorphoMapping(unittest.TestCase):
 
         pd.testing.assert_frame_equal(df1, df2)
 
-
     def test_add_metadata(self):
         test_MM = MM()
         test_MM.df = pd.DataFrame()
@@ -208,8 +207,6 @@ class TestMorphoMapping(unittest.TestCase):
         df1 = pd.read_excel("./files/xlsx_test_file_small_2.xlsx", index_col=0)
         df2 = pd.read_csv(self.test_csv_path, index_col=0)
         pd.testing.assert_frame_equal(df1,df2)
-
-
 
     def test_save_csv(self):
         test_MM=MM()
