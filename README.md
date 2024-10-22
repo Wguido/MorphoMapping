@@ -4,7 +4,8 @@ MorphoMapping is an analytical framework designed for the analysis of Imaging Fl
 
 # Description
 
-![Untitled (7)](https://github.com/user-attachments/assets/2d81debe-934b-4971-8409-a4f62bb0dd10)
+![Untitled (8)](https://github.com/user-attachments/assets/f8f4b60b-e4ed-4975-a6b0-fccc29012972)
+
 
 # Installation
 
