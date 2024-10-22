@@ -61,7 +61,7 @@ and run the notebook by entering `jupyter-notebook` into the terminal.
 | `scikit-learn` | 
 | `umap-learn` | 
 
-* The following R libraries (R V.4.2.1)  are required for MorphoMapping's optional DAFtoFCS-Converter:
+* The following R libraries (R V.4.2.1)  are required for MorphoMapping's optional DAFtoFCS-Converter and the Cluster Analysis:
   
 | Library | Version |
 | --- | --- |
