@@ -87,22 +87,20 @@ bokeh_above_three = int(bokeh_version.split(".")[0]) >= 3
 
 class MM:
 
+    """\
+    A class to create interactive dimensionality reduction plots.
+    Based on pandas DataFrame.
+
+    Parameters
+    ----------
+    df
+        DataFrame containing all Imaging Flow Cytometry data
+
+    Returns
+    -------
+    None
+
     """
-       A class to create interactive dimensionality reduction plots.
-       Based on pandas DataFrame.
-
-       ...
-
-       Attributes
-       ----------
-       df: DataFrame
-           DataFrame containing all Imaging Flow Cytometry data
-
-       Methods
-       -------
-       see above (module morphomapping)
-
-       """
 
 
 
@@ -142,21 +140,21 @@ class MM:
             raise
 
     def read_CSV(self, path: str, add_index: bool =False, index_name: str ='Index'):
-        """
-         Read CSV file and save it as self.df
+        """\
+        Load csv-file and save it as self.df
 
-            Parameters
-            ----------
-            path : str
-                path to csv file
-            add_index : bool (default=False)
-                add index to df
-            index_name: str (default='Index')
-                set name of index
+        Parameters
+        ----------
+        path
+            path to csv file
+        add_index
+            add index to df
+        index_name
+            set name of index
 
-            Returns
-            ----------
-            DataFrame
+        Returns
+        ----------
+        DataFrame
 
         """
 
@@ -178,38 +176,53 @@ class MM:
         return self.df
 
     def get_features(self):
-        """return list of self.df columns"""
+        """\
+        return list of self.df columns
+        """
         return list(self.df.columns)
 
     def get_df(self):
-        """return self.df"""
+        """\
+        return self.df
+        """
         return self.df
 
     def add_metadata(self, label: str, value):
-        """
-           add column with specific value to self.df
+        """\
+        add column with specific value to self.df
 
-            Parameters
-            ----------
-                label : str
-                    name of column
-                value:
-                    value of column
+        Parameters
+        ----------
+        label
+            name of column
+        value
+            value of column
 
-            Returns
-            ----------
-            DataFrame
+        Returns
+        ----------
+        DataFrame
 
         """
         empty = self.df.empty
         if empty:
             raise ValueError("Dataframe is empty.")
+
         self.df[label] = value
         return self.df
 
     def rename_variables(self, label_mapping):
-        """
-            rename column(s) with new column labels
+        """\
+        rename column(s) with new column labels
+
+        Parameters
+        ----------
+        label_mapping
+            old and new assigned column labels
+
+        Returns
+        ----------
+        None
+
         """
 
         missing_columns = [col for col in label_mapping.keys() if col not in self.df.columns]
@@ -220,20 +233,19 @@ class MM:
             self.df.rename(columns=label_mapping, inplace=True)
 
     def select_condition(self, condition: str, value):
-        """
-           select specific rows by condition and save new df as self.df
+        """\
+        select specific rows by condition and save new df as self.df
 
-            Parameters
-            ----------
-                condition : str
-                    name of column
-                value:
-                    value of column
+        Parameters
+        ----------
+        condition
+            name of column
+        value
+            value of column
 
-            Returns
-            ----------
-            None
-
+        Returns
+        ----------
+        None
         """
 
         if condition not in self.df.columns:
@@ -244,14 +256,17 @@ class MM:
         self.df = self.df.loc[self.df[condition] == value]
 
     def select_events(self, event_size: int):
-        """
-            randomly select events and save as self.df
+        """\
+        randomly select events and save as self.df
 
-            Parameters
-            ----------
-                event_size : int
-                    number of events
+        Parameters
+        ----------
+        event_size
+            number of events
 
+        Returns
+        ----------
+        None
         """
 
         if event_size > self.df.shape[0]:
@@ -261,7 +276,18 @@ class MM:
             self.df.sort_index(inplace=True)
 
     def drop_variables(self, *labels):
-        """drop certain columns from self.df"""
+        """\
+        drop certain columns from self.df
+
+        Parameters
+        ----------
+        labels
+            name of column(s)
+
+        Returns
+        ----------
+        None
+        """
         missing_labels = [label for label in labels if label not in self.df.columns]
         if missing_labels:
             raise ValueError(f"Column(s) {missing_labels} do not exist.")
@@ -269,7 +295,20 @@ class MM:
             self.df = self.df.drop(columns=list(labels))
 
     def drop_events(self, first_row: int, last_row: int):
-        """drop specific rows from self.df"""
+        """\
+        drop specific rows from self.df
+
+        Parameters
+        ----------
+        first_row
+            number of first row that should be dropped
+        last_row
+            number of last row that should be dropped
+
+        Returns
+        ----------
+        None
+        """
         if first_row not in self.df.index:
             raise ValueError(f"First row '{first_row}' does not exist.")
         if last_row not in self.df.index:
@@ -279,7 +318,18 @@ class MM:
         self.df = self.df.drop(index=self.df.index[first_row:last_row + 1])
 
     def save_feature(self, *features):
-        """save specific columns of self.df in new DataFrame and return new DataFrame"""
+        """\
+        save specific columns of self.df in new DataFrame and return new DataFrame
+
+        Parameters
+        ----------
+        features
+            name of features which should be returned as df
+
+        Returns
+        ----------
+        DataFrame
+        """
         labels = [feature for feature in features if feature not in self.df.columns]
         if labels:
             raise ValueError(f"Column(s) {labels} do not exist.")
@@ -289,40 +339,85 @@ class MM:
         return df
 
     def concat_variables(self, *dataframes):
-        """attach new columns to self.df"""
+        """\
+        attach new columns as df to self.df and return resulting df
+
+        Parameters
+        ----------
+        dataframes
+            new dataframes which should be attached to self.df
+
+        Returns
+        ----------
+        DataFrame
+        """
         result_df = pd.concat([self.df] + list(dataframes), axis=1)
         self.df = result_df
         return result_df
 
     def save_xlsx(self, path: str):
-        """save self.df as xlsx file to chosen path"""
+        """\
+        save self.df as xlsx file to chosen path
+
+        Parameters
+        ----------
+        path
+            chosen path
+
+        Returns
+        ----------
+        None
+        """
         self.df.to_excel(path, index=False)
         print(f"DataFrame successfully saved to {path}")
 
     def save_csv(self, path: str):
-        """ save self.df as csv to chosen path"""
+        """\
+        save self.df as csv to chosen path
+
+        Parameters
+        ----------
+        path
+            chosen path
+
+        Returns
+        ----------
+        None
+        """
         self.df.to_csv(path, index=False)
         print(f"DataFrame successfully saved to {path}")
 
     def concat_df(self, *new_df, join='inner'):
-        """concatenate self.df and new DataFrame(s) (joining inner by default)"""
+        """\
+        concatenate self.df and new DataFrame(s) (joining inner by default)
+
+        Parameters
+        ----------
+        new_df
+            DataFrames that should be concatenated
+        join
+            type of joining DataFrames
+
+        Returns
+        ----------
+        None
+        """
         self.df = pd.concat([self.df, *new_df], join=join)
 
     def update_column_values(self, column_name: str, rename_values):
-        """
-            replace values in a specific column with a specific new value
+        """\
+        replace values in a specific column with a specific new value
 
-            Parameters
-            ----------
-                column_name : str
-                    name of column
-                rename_values:
-                    new value of column
+        Parameters
+        ----------
+        column_name
+            name of column
+        rename_values
+            new value of column
 
-            Returns
-            ----------
-            None
-
+        Returns
+        ----------
+        None
         """
 
         if column_name not in self.df.columns:
@@ -334,20 +429,20 @@ class MM:
             self.df[column_name] = self.df[column_name].str.replace(str(original_value), new_value)
 
     def minmax_norm(self, first_column: Optional[str] = None, last_column: str =None):
-        """
-            Apply MinMax normalization to self.df.
-            Specify whether all columns should be normalized by setting parameters.
+        """\
+        Apply MinMax normalization to self.df.
+        Specify whether all columns should be normalized by setting parameters.
 
-            Parameters
-            ----------
-                first_column : str
-                    name of first column. Start of normalization.
-                last_column:
-                    name of last column. End of normalization.
+        Parameters
+        ----------
+        first_column
+            name of first column. Start of normalization.
+        last_column:
+            name of last column. End of normalization.
 
-            Returns
-            ----------
-            None
+        Returns
+        ----------
+        None
 
         """
 
@@ -378,21 +473,20 @@ class MM:
 
 
     def quant_scaler(self, first_column: Optional[str] = None, last_column: str =None):
-        """
-            Apply  QuantileTransformer to self.df.
-            Specify whether all columns should be normalized by setting parameters.
+        """\
+        Apply  QuantileTransformer to self.df.
+        Specify whether all columns should be normalized by setting parameters.
 
-            Parameters
-            ----------
-                first_column : str
-                    name of first column. Start of normalization.
-                last_column:
-                    name of last column. End of normalization.
+        Parameters
+        ----------
+        first_column
+            name of first column. Start of normalization.
+        last_column
+            name of last column. End of normalization.
 
-            Returns
-            ----------
-            None
-
+        Returns
+        ----------
+        None
         """
 
         if first_column is None or last_column is None:
@@ -423,22 +517,21 @@ class MM:
 
 
     def umap(self, nn: int, mdist: float, met: str):
+        """\
+        Run umap with self.df. Adds x and y values to self.df as extra columns.
 
-        """
-            Run umap with self.df. Adds x and y values to self.df as extra columns.
+        Parameters
+        ----------
+        nn
+            nearest neighbours for umap settings
+        mdist
+            minimum distance for umap settings
+        met
+            metric for umap settings
 
-            Parameters
-            ----------
-                nn : int
-                    nearest neighbours for umap settings
-                mdist:
-                    minimum distance for umap settings
-                met:
-                    metric for umap settings
-
-            Returns
-            ----------
-            None
+        Returns
+        ----------
+        None
 
         """
         reducer = umap.UMAP(
@@ -456,24 +549,23 @@ class MM:
         self.df['y'] = y
 
     def dmap(self, dlambda: float, nn: int, mdist: float, met: str):
-        """
-            Run dmap with self.df. Adds x and y values to self.df as extra columns.
+        """\
+        Run dmap with self.df. Adds x and y values to self.df as extra columns.
 
-            Parameters
-            ----------
-                dlambda: float
-                    denslambda for densmap settings
-                nn : int
-                    nearest neighbours for densmap settings
-                mdist:
-                    minimum distance for densmap settings
-                met:
-                    metric for densmap settings
+        Parameters
+        ----------
+        dlambda
+            denslambda for densmap settings
+        nn
+            nearest neighbours for densmap settings
+        mdist
+            minimum distance for densmap settings
+        met
+            metric for densmap settings
 
-            Returns
-            ----------
-            None
-
+        Returns
+        ----------
+        None
         """
 
         reducer = umap.UMAP(
@@ -492,20 +584,20 @@ class MM:
         self.df['y'] = y
 
     def feature_importance(self, dep: str, indep: str):
-        """
-            Calculates feature importance of columns in self.df (especially for x and y after dmap/umap were run).
-            Returns DataFrame with the 10 most important features and their according importance values.
+        """\
+        Calculates feature importance of columns in self.df (especially for x and y after dmap/umap were run).
+        Returns DataFrame with the 10 most important features and their according importance values.
 
-            Parameters
-            ----------
-                dep : str
-                    name of column which should represent the dependent variable
-                indep:
-                    name of column which should represent the independent variable
+        Parameters
+        ----------
+        dep
+            name of column which should represent the dependent variable
+        indep
+            name of column which should represent the independent variable
 
-            Returns
-            ----------
-            DataFrame
+        Returns
+        ----------
+        DataFrame
 
         """
 
@@ -559,27 +651,26 @@ class MM:
 
 
     def plot_feature_importance(self, features, path: str, base_width: int =10, base_height: int =6):
+        """\
+        Plots the ten most important features and returns a pyplot.
+        Needs the ten top features and their importances as parameters.
+
+        Parameters
+        ----------
+        features
+            DataFrame returned by function feature_importance
+        path
+            path to dict where plot should be saved
+        base_width
+            width of plot
+        base_height
+            height of plot
+
+        Returns
+        ----------
+        Show plot
+
         """
-            Plots the ten most important features and returns a pyplot.
-            Needs the ten top features and their importances as parameter.
-
-            Parameters
-            ----------
-                features :
-                    DataFrame returned by function feature_importance
-                path: str
-                    path to dict where plot should be saved
-                base_width: int (default=10)
-                    width of plot
-                base_height: int (default=6)
-                    height of plot
-
-            Returns
-            ----------
-            None
-
-        """
-
 
         num_features = len(features)
 
@@ -618,20 +709,21 @@ class MM:
         return plt.show()
 
     def cluster_kmeans(self, n_cluster: int, label_x: str, label_y: str):
-        """Cluster self.df by kmeans clustering and show result as plt.show().
+        """\
+        Cluster self.df by kmeans clustering and show result as plt.show().
 
-            Parameters
-            ----------
-                number_cluster : int
-                    number of clusters
-                label_x: str
-                    x-axis label
-                label_y: str
-                    y-axis label
+        Parameters
+        ----------
+        number_cluster
+            number of clusters
+        label_x
+            x-axis label
+        label_y
+            y-axis label
 
-            Returns
-            ----------
-            None
+        Returns
+        ----------
+        Show plot
         """
 
         kmeans_labels = cluster.KMeans(n_clusters=n_cluster).fit_predict(self.df)
@@ -656,24 +748,23 @@ class MM:
         return plt.show()
 
     def cluster_gmm(self, number_component: int, random_s: int, label_x: str, label_y: str):
-        """
-           Cluster self.df by Gaussian Mixture Modeles and plot result.
+        """\
+        Cluster self.df by Gaussian Mixture Modeles and plot result.
 
-            Parameters
-            ----------
-                number_component : int
-                    number of components of gmm clustering
-                random_s: int
-                    random state of gmm clustering
-                label_x: str
-                    x-axis label
-                label_y: str
-                    y-axis label
+        Parameters
+        ----------
+        number_component
+            number of components of gmm clustering
+        random_s
+            random state of gmm clustering
+        label_x
+            x-axis label
+        label_y
+            y-axis label
 
-
-            Returns
-            ----------
-            None
+        Returns
+        ----------
+        Show plot
 
         """
 
@@ -702,21 +793,21 @@ class MM:
         return plt.show()
 
     def cluster_hdbscan(self, cluster_size: int, label_x: str, label_y: str):
-        """
-           Cluster self.df by hdbscan and plot result.
+        """\
+        Cluster self.df by hdbscan and plot result.
 
-            Parameters
-            ----------
-                cluster_size : int
-                    size of clusters
-                label_x: str
-                    x-axis label
-                label_y: str
-                    y-axis label
+        Parameters
+        ----------
+        cluster_size
+            size of clusters
+        label_x
+            x-axis label
+        label_y
+            y-axis label
 
-            Returns
-            ----------
-            None
+        Returns
+        ----------
+        Show plot
 
         """
 
@@ -760,27 +851,31 @@ class MM:
     #def for dmap/umap plots
 
     def check_dataframe(self):
-        """check if df is empty """
+        """\
+        check if df is empty
+        """
         if self.df.empty:
             raise ValueError("Dataframe is empty.")
 
     def prepare_data_source(self):
-        """set ColumnDataSource as self.df"""
+        """\
+        set ColumnDataSource as self.df and return ColumnDataSource
+        """
         return ColumnDataSource(self.df)
 
     def configure_hover_tooltips(self, feature: str, hover_tooltips: list[tuple[str, str]] = None):
-        """
-          Set hover tooltips. Either standard or personalized.
+        """\
+        Set hover tooltips. Either standard or personalized.
 
-            Parameters
-            ----------
-                feature: str
-                  column of dataset
-                hover_tooltips: list[tuple[str,str]]
+        Parameters
+        ----------
+        feature
+            column of dataset
+        hover_tooltips
 
-            Returns
-            ----------
-            HoverTool
+        Returns
+        ----------
+        HoverTool
 
         """
         if hover_tooltips is None:
@@ -811,33 +906,33 @@ class MM:
                          range_y: list[float],
                          tools_emb,
                          title_align: str):
-        """
-                  Settings for plotting umap/densmap.
+        """\
+        Settings for plotting umap/densmap.
 
-                    Parameters
-                    ----------
-                    fig_width: int
-                       width of figure
-                    fig_height: int
-                       height of figure
-                    fig_title: str
-                       title of figure
-                    label_x: str
-                       x-axis label
-                    label_y: str
-                       y-axis label
-                    range_x: list[float]
-                       range of x-axis
-                    range_y: list[float]
-                       range of y-axis
-                    tools_emb
-                       tools that should be embedded
-                    title_align: str
-                       position of title
+        Parameters
+        ----------
+        fig_width
+            width of figure
+        fig_height
+            height of figure
+        fig_title
+            title of figure
+        label_x
+            x-axis label
+        label_y
+            y-axis label
+        range_x
+            range of x-axis
+        range_y
+            range of y-axis
+        tools_emb
+            tools that should be embedded
+        title_align
+            position of title
 
-                    Returns
-                    ----------
-                    plot
+        Returns
+        ----------
+        plot
 
         """
         if not bokeh_above_three:
@@ -872,20 +967,20 @@ class MM:
         return plot
 
     def configure_axes_and_legend(self, plot, show_axes: bool, show_legend: bool):
-        """
-                   Settings for axes and legend.
+        """\
+        Settings for axes and legend.
 
-                    Parameters
-                    ----------
-                    plot: plot
-                    show_axes: bool
-                      add axes
-                    show_legend: bool
-                      add legend
+        Parameters
+        ----------
+        plot
+        show_axes
+            add axes
+        show_legend
+            add legend
 
-                    Returns
-                    ----------
-                    None
+        Returns
+        ----------
+        None
 
         """
 
@@ -935,54 +1030,52 @@ class MM:
                  show_axes: bool = False,
                  title_align: str = 'center') -> None:
 
+        """\
+        Create plot with categorical color mapper.Choose feature, colors and more.
+        Loads html file.
+
+        Parameters
+        ----------
+        feature
+            feature for categorical mapper
+        subs
+            values of feature
+        colors
+            list of colors
+        outputf
+            path to outputfile
+        fig_width
+            width of figure
+        fig_height
+            height of figure
+        fig_title
+            title of figure
+        label_x
+            x-axis label
+        label_y
+            y-axis label
+        range_x
+            x-axis range
+        range_y
+            y-axis range
+        hover_tooltips
+            hover tooltips
+        show_legend
+            possibility to add legend
+        point_size
+            size of points
+        point_alpha
+            alpha of points
+        show_axes
+            add axes
+        title_align
+            position of title
+
+        Returns
+        ----------
+        show plot
+
         """
-                    Create plot with categorical color mapper.Choose feature, colors and more.
-                    Loads html file.
-
-
-                    Parameters
-                    ----------
-                    feature: str
-                       feature for categorical mapper
-                    subs: list[str]
-                       values of feature
-                    colors: list[str]
-                       list of colors
-                    outputf: str
-                       path to outputfile
-                    fig_width: int
-                       width of figure
-                    fig_height: int,
-                       height of figure
-                    fig_title: str
-                       title of figure
-                    label_x: str
-                       x-axis label
-                    label_y: str
-                       y-axis label
-                    range_x: list[float]
-                       x-axis range
-                    range_y: list[float]
-                       y-axis range
-                    hover_tooltips: list[tuple[str, str]] = None,
-                       hover tooltips
-                    show_legend: bool = False
-                       possibility to add legend
-                    point_size: int = 10
-                       size of points
-                    point_alpha: float = 0.6
-                       alpha of points
-                    show_axes: bool = False
-                       add axes
-                    title_align: str = 'center'
-                       position of title
-
-                    Returns
-                    ----------
-                    None
-
-        """
-
 
         self.check_dataframe()
         output_file(outputf)
@@ -1033,48 +1126,48 @@ class MM:
                  title_align: str = 'center') -> None:
 
 
-        """
-                    Create plot with Linear color mapper.Choose feature, colors and more.
-                    Loads html file.
+        """\
+        Create plot with Linear color mapper.Choose feature, colors and more.
+        Loads html file.
 
+        Parameters
+        ----------
+        outputf
+            path to output file
+        feature
+            feature for linear mapper
+        colors
+            list of colors
+        fig_width
+            width of figure
+        fig_height
+            height of figure
+        fig_title
+            title of figure
+        label_x
+            x-axis label
+        label_y
+            y-axis label
+        range_x
+            range of x-axis
+        range_y
+            range of y-axis
+        hover_tooltips
+            hover tooltips
+        show_legend
+            add legend
+        point_size
+            size of points
+        point_alpha
+            alpha of points
+        show_axes
+            add axes
+        title_align
+            title position
 
-                    Parameters
-                    ----------
-                    outputf: str
-                       path to output file
-                    feature: str
-                       feature for linear mapper
-                    colors: list[str]
-                       list of colors
-                    fig_width: int
-                       width of figure
-                    fig_height: int
-                       height of figure
-                    fig_title: str
-                       title of figure
-                    label_x: str
-                       x-axis label
-                    label_y: str
-                       y-axis label
-                    range_x: list[float]
-                       range of x-axis
-                    range_y: list[float]
-                       range of y-axis
-                    hover_tooltips: list[tuple[str, str]] = None
-                    show_legend: bool = False
-                       add legend
-                    point_size: int = 3
-                       size of points
-                    point_alpha: float = 0.7
-                       alpha of points
-                    show_axes: bool = True
-                       add axes
-                    title_align: str = 'center'
-                       title position
-
-                    Returns
-                    ----------
-                    None
+        Returns
+        ----------
+        show plot
 
         """
 
