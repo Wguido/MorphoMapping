@@ -31,7 +31,7 @@ In order to get the latest version, install from [GitHub](https://github.com/Wgu
 
 Alternatively, clone the repository to your local hard drive via
 
-    git clone https://github.com/Wguido/MorphMapping.git && cd MorphoMapping
+    git clone https://github.com/Wguido/MorphoMapping.git && cd MorphoMapping
     git checkout --track origin/main
     pip install .
 
