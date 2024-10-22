@@ -1,8 +1,6 @@
 # MorphoMapping
-
-The MorphoMapping repository contains the code and raw data used for our ‚xy‘ paper.  
-The framework can be found in the 'MorphoMapping' folder.  
-IFC data was acquired through the IDEAS® software.
+ 
+MorphoMapping is an analytical framework designed for the analysis of Imaging Flow Cytometry (IFC) data. It is based on our Python package, morphomapping, which provides tools for dimensionality reduction and clustering of IFC data. 
 
 # Description
 
@@ -51,19 +49,19 @@ and run the notebook by entering `jupyter-notebook` into the terminal.
 * The following Python packages (Python V.3.9.15) are needed for MorphoMapping:
   
 | Package | Version |
-| --- | --- |
-| `bokeh` | *2.4.3*  |
-| `flowkit` | *0.9.3*  |
-| `hdbscan` | *0.8.28*  |
-| `matplotlib` | *3.6.2*  |
-| `numpy` | *1.22.3*  |
-| `pandas` | *1.5.2*  |
-| `pandas-bokeh` | *0.5.5*  |
-| `seaborn` | *0.12.1*  |
-| `scikit-learn` | *1.0.2*  |
-| `umap-learn` | *0.5.5*  |
+| --- | 
+| `bokeh` | 
+| `flowkit` | 
+| `hdbscan` | 
+| `matplotlib` | 
+| `numpy` | 
+| `pandas` | 
+| `pandas-bokeh` | 
+| `seaborn` | 
+| `scikit-learn` | 
+| `umap-learn` | 
 
-* The following R libraries (R V.4.2.1)  are required for MorphoMapping:
+* The following R libraries (R V.4.2.1)  are required for MorphoMapping's optional DAFtoFCS-Converter:
   
 | Library | Version |
 | --- | --- |
