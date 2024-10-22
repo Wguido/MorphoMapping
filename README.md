@@ -56,9 +56,8 @@ and run the notebook by entering `jupyter-notebook` into the terminal.
 | `hdbscan` | 
 | `matplotlib` | 
 | `numpy` | 
+| `openpyxl` | 
 | `pandas` | 
-| `pandas-bokeh` | 
-| `seaborn` | 
 | `scikit-learn` | 
 | `umap-learn` | 
 
