@@ -45,7 +45,7 @@ Jupyter notebooks are highly recommended due to their extensive visualization ca
 and run the notebook by entering `jupyter-notebook` into the terminal.
 
 
-### Dependencies
+## Dependencies
 * The following Python packages are needed for MorphoMapping:
   
 | Package | 
