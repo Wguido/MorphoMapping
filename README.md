@@ -11,12 +11,6 @@ MorphoMapping is an analytical framework designed for the analysis of Imaging Fl
 | Step 3 | morphomapping (Python)|
 | Step 4 | Cluster Analysis (R)|
 
-
-
-
-![Untitled (9)](https://github.com/user-attachments/assets/9f303bc0-be28-49e6-8140-e78490b405d0)
-
-
 # Installation
 
 It is recommended to choose conda as your package manager. Conda can be obtained, e.g., by installing the Miniconda distribution. For detailed instructions, please refer to the respective documentation.
