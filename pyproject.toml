@@ -47,6 +47,11 @@ docs = [
 [tool.hatch.metadata]
 allow-direct-references = true
 
+[tool.hatch.build]
+exclude = [
+    "_resources/**"
+]
+
 [project.urls]
 "Homepage" = "http://github.com/Wguido/MorphoMapping/"
 "BugTracker" = "http://github.com/Wguido/MorphoMapping/"
