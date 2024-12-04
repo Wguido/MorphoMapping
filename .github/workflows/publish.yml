@@ -22,11 +22,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip setuptools wheel twine
 
-      - name: Build the package
-        run: |
-          python setup.py sdist bdist_wheel
+      - name: Install build tool
+        run: pip install build
 
-      - name: Publish to PyPI
+      - name: Build package
+        run: python -m build
+
+     - name: Publish to PyPI
         env:
           TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
           TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
