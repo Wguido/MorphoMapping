@@ -52,6 +52,12 @@ exclude = [
     "_resources/**"
 ]
 
+[tool.hatch.build.targets.wheel]
+packages = ["MorphoMapping/morphomapping"]
+exclude = ["resources/raw_data/*"]
+
+
+
 [project.urls]
 "Homepage" = "http://github.com/Wguido/MorphoMapping/"
 "BugTracker" = "http://github.com/Wguido/MorphoMapping/"
