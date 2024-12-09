@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "morphomapping"
-version = "0.0.2"
+version = "0.0.2.1"
 authors = [
   { name="Amelie Bauerdick", email="Amelie.Bauerdick@stud.uni-heidelberg.de" },
 ]
@@ -53,8 +53,8 @@ exclude = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["MorphoMapping/morphomapping"]
-exclude = ["resources/raw_data/*"]
+packages = ["morphomapping/morphomapping"]
+exclude = ["_resources/raw_data/*"]
 
 
 
