@@ -22,7 +22,7 @@ With conda installed, open your terminal and create a new environment by executi
 
 ## PyPI
 
-There is a pypi release available:
+Currently, morphomapping is in beta phase. There will be a pypi release available in the future:
 
     pip install morphomapping
 
