@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "morphomapping"
-version = "0.0.6"
+version = "0.0.7"
 authors = [
   { name="Amelie Bauerdick", email="Amelie.Bauerdick@stud.uni-heidelberg.de" },
 ]
