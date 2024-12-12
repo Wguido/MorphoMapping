@@ -2,6 +2,7 @@
 
 [![Documentation][badge-docs]][link-docs]
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+
 [badge-docs]: https://img.shields.io/readthedocs/morphomapping
  
 MorphoMapping is an analytical framework designed for the analysis of Imaging Flow Cytometry (IFC) data. It is based on our Python package, morphomapping, which provides tools for dimensionality reduction and clustering of IFC data. Step 2 and Step 4 can be considered optional.
@@ -82,7 +83,6 @@ and run the notebook by entering `jupyter-notebook` into the terminal.
 | `here` | *1.0.1*  |
 | `IFC` | *0.2.1*  |
 | `rstatix` | *0.7.2*  |
-
 
 
 [link-docs]: https://morphomapping.readthedocs.io
