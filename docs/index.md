@@ -1,4 +1,4 @@
-# Welcome to MorphoMapper's documentation!
+# Welcome to MorphoMapping's documentation!
 
 MorphoMapping is a toolbox to analyze Imaging Flow Cytometry data!
 
