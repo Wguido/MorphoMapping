@@ -48,7 +48,6 @@ Alternatively, clone the repository to your local hard drive via
     git checkout --track origin/main
     pip install .
 
-Note that while MorphoMapping is in beta phase, you need to have access to the private repo.
 
 ## Jupyter notebooks
 
