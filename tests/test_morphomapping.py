@@ -4,6 +4,12 @@ import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import tempfile
+import shutil
+from sklearn.preprocessing import StandardScaler
+from adjustText import adjust_text
+from unittest.mock import patch
+
 
 class TestMorphoMapping(unittest.TestCase):
 
@@ -11,6 +17,8 @@ class TestMorphoMapping(unittest.TestCase):
         self.test_fcs_path="./files/FCS_test_file.fcs"
         self.test_csv_path = "./files/CSV_test_file_small.csv"
         self.test_xlsx_path = "./files/xlsx_test_file_small.xlsx"
+
+        self.file_names=["CSV_test_file_small.csv", "CSV_test_file_small_2.csv"]
 
         self.df = pd.DataFrame({
             "Area_Ch01": [5.7, 14, 9.6],
@@ -68,6 +76,44 @@ class TestMorphoMapping(unittest.TestCase):
 
         if os.path.exists(test_csv_path):
             os.remove(test_csv_path)
+
+    def test_read_files(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            test_MM = MM()
+
+            df1 = pd.DataFrame({"c1": [0, 1], "c2": ["a", "b"]})
+            csv_path_1 = os.path.join(temp_dir, "test1.csv")
+            df1.to_csv(csv_path_1, index=False)
+
+            df2 = pd.DataFrame({"c1": [2, 3], "c3": ["c", "d"]})
+            csv_path_2 = os.path.join(temp_dir, "test2.csv")
+            df2.to_csv(csv_path_2, index=False)
+
+
+            df_outer = test_MM.read_files(temp_dir, add_index=True, index_name="Index", join="outer")
+            #print("Files loaded:", df_outer["file"].unique())
+            #print("Resulting DataFrame:\n", df_outer)
+            #print("Number of rows:", len(df_outer))
+            #print("Dateien im Temp-Verzeichnis:", os.listdir(temp_dir))
+
+            self.assertEqual(len(df_outer), 4)  # 2 + 2 rows
+            self.assertIn("c2", df_outer.columns)
+            self.assertIn("c3", df_outer.columns)
+            self.assertTrue(df_outer.isnull().any().any())  # Wegen fehlender Spalten
+
+            test_MM.df = pd.DataFrame()
+            df_inner = test_MM.read_files(temp_dir, add_index=True, index_name="Index", join="inner")
+            #print("Files loaded:", df_inner["file"].unique())
+            #print("Resulting DataFrame:\n", df_inner)
+            #print("Number of rows:", len(df_inner))
+            #print("Dateien im Temp-Verzeichnis:", os.listdir(temp_dir))
+            self.assertEqual(len(df_inner), 4)
+            self.assertIn("c1", df_inner.columns)
+            self.assertNotIn("c2", df_inner.columns)
+            self.assertNotIn("c3", df_inner.columns)
+
 
     def test_get_features(self):
         test_MM=MM()
@@ -225,15 +271,35 @@ class TestMorphoMapping(unittest.TestCase):
         test_MM.read_CSV(self.test_csv_path)
 
         df = pd.DataFrame({
-            "test_number": [1, 2, 3],
+            "Area_Ch01": [10],
+            "Donor": ["KBH"],
+            "File_Number": [4],
         })
 
-        test_MM.concat_df(df)
+        df_final = pd.DataFrame({
+            "Area_Ch01": [5.7, 14, 9.6, 10],
+            "Donor": ["JBZ", "IKH", "LME","KBH"],
+            "File_Number": [1, 2, 3, 4],
+        })
 
+        test_MM.concat_df(df, add_index=False)
         dfc1 = test_MM.get_df()
-        dfc2 = pd.concat([self.df,df], join='inner')
+        pd.testing.assert_frame_equal(dfc1, df_final)
 
-        pd.testing.assert_frame_equal(dfc1, dfc2)
+        test_MM = MM()
+        test_MM.read_CSV(self.test_csv_path)
+        test_MM.concat_df(df, add_index=True)
+        dfc1i = test_MM.get_df()
+
+        df_final_index = pd.DataFrame({
+            "Index":[0, 1, 2, 3],
+            "Area_Ch01": [5.7, 14, 9.6, 10],
+            "Donor": ["JBZ", "IKH", "LME", "KBH"],
+            "File_Number": [1, 2, 3, 4],
+        })
+
+        dfc1i = dfc1i.reset_index()
+        pd.testing.assert_frame_equal(dfc1i, df_final_index)
 
     def test_update_column_values(self):
         test_MM = MM()
@@ -257,6 +323,69 @@ class TestMorphoMapping(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             test_MM.update_column_values("Non_Existent_Column", updated_values)
+
+    def test_weighted_features (self):
+        test_MM=MM()
+        test_MM.read_CSV(self.test_csv_path)
+
+        df1=test_MM.weighted_features(['Area_Ch01','File_Number'],2)
+
+        df2 = pd.DataFrame({
+            "Area_Ch01": [11.4, 28, 19.2],
+            "Donor": ["JBZ", "IKH", "LME"],
+            "File_Number": [2, 4, 6]
+        })
+        print(df1)
+        print(df2)
+
+        pd.testing.assert_frame_equal(df1, df2)
+
+    def test_stand_scaler(self):
+        test_MM = MM()
+        test_MM.df = pd.DataFrame({
+            "c1": [1, 2, 3, 4, 5],
+            "c2": [10, 20, 30, 40, 50],
+            "c3": [1000, 2000, 3000, 4000, 5000]
+        })
+
+        test_MM.stand_scaler()
+
+        df1 = pd.DataFrame(
+            StandardScaler().fit_transform(pd.DataFrame({
+                "c1": [1, 2, 3, 4, 5],
+                "c2": [10, 20, 30, 40, 50],
+                "c3": [1000, 2000, 3000, 4000, 5000]
+            })),
+            columns=["c1", "c2", "c3"]
+        )
+
+        pd.testing.assert_frame_equal(test_MM.df.reset_index(drop=True), df1)
+
+        test_MM.df = pd.DataFrame({
+            "c1": [1, 2, 3, 4, 5],
+            "c2": [10, 20, 30, 40, 50],
+            "c3": [1000, 2000, 3000, 4000, 5000]
+        })
+
+
+        test_MM.stand_scaler("c1", "c2")
+
+
+        c1c2 = StandardScaler().fit_transform(test_MM.df[["c1", "c2"]])
+        df1 = test_MM.df.copy()
+        df1[["c1", "c2"]] = c1c2
+
+        pd.testing.assert_frame_equal(test_MM.df, df1)
+
+
+        with self.assertRaises(ValueError):
+            test_MM.stand_scaler("nonexistent_column", "c2")
+
+        with self.assertRaises(ValueError):
+            test_MM.stand_scaler("c3", "c1")
+
+        with self.assertRaises(ValueError):
+            MM().stand_scaler()
 
     def test_minmax_norm(self):
         test_MM = MM()
@@ -531,7 +660,6 @@ class TestMorphoMapping(unittest.TestCase):
 
         plot_path = "./test_lin_plot.html"
 
-
         test_MM.lin_plot(
             feature='feature',
             colors='Plasma256',
@@ -554,6 +682,77 @@ class TestMorphoMapping(unittest.TestCase):
         self.assertTrue(os.path.exists(plot_path))
 
         os.remove(plot_path)
+
+    def test_cell_plot(self):
+        df = pd.DataFrame({
+            'x': np.random.rand(50),
+            'y': np.random.rand(50),
+            'cluster': np.random.choice([0, 1, 2], 50)
+        }, index=[f"cell_{i}" for i in range(50)])
+
+        mm = MM()
+        mm.df = df
+
+        palette = ['blue', 'green', 'orange', 'purple', 'pink']
+
+        with self.assertRaises(ValueError):
+            mm.cell_plot(
+                cluster_column='invalid_column',
+                top_clusters=2,
+                palette=palette,
+                ID=[],
+                x_label="X",
+                y_label="Y",
+                png=False,
+                svg=False,
+                name="test_plot"
+            )
+
+        with patch("matplotlib.pyplot.savefig") as mock_savefig:
+            mm.cell_plot(
+                cluster_column='cluster',
+                top_clusters=2,
+                palette=palette,
+                ID=["cell_1"],
+                x_label="x-axis",
+                y_label="y-axis",
+                png=True,
+                svg=False,
+                name="test_plot"
+            )
+            mock_savefig.assert_called_once()
+            self.assertTrue(mock_savefig.call_args[0][0].endswith(".png"))
+
+
+        with patch("matplotlib.pyplot.savefig") as mock_savefig:
+            mm.cell_plot(
+                cluster_column='cluster',
+                top_clusters=2,
+                palette=palette,
+                ID=["cell_2"],
+                x_label="x-axis",
+                y_label="y-axis",
+                png=False,
+                svg=True,
+                name="test_plot"
+            )
+            mock_savefig.assert_called_once()
+            self.assertTrue(mock_savefig.call_args[0][0].endswith(".svg"))
+
+        with patch("builtins.print") as mock_print:
+            mm.cell_plot(
+                cluster_column='cluster',
+                top_clusters=2,
+                palette=palette,
+                ID=["non_existent_id"],
+                x_label="X",
+                y_label="Y",
+                png=False,
+                svg=False,
+                name="test_plot"
+            )
+            mock_print.assert_any_call(
+                " The following highlight IDs were not found in the dataset: ['non_existent_id']")
 
 
 if __name__ =='__main__':

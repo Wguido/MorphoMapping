@@ -16,6 +16,7 @@ Functions:
 
     convert_to_CSV(fcs_path: str, csv_path: str)
     read_CSV(path: str, add_index: bool, index_name: str) -> df
+    read_files(self,path: str, add_index: bool =False, index_name: str ='Index')->df
     get_features -> list
     get_df -> df
     add_metadata(label: str, value) -> df
@@ -28,8 +29,10 @@ Functions:
     concat_variables(*dataframes) -> df
     save_xlsx(path: str)
     save_csv(path: str)
-    concat_df(*new_df, join='inner')
+    concat_df(self, *new_df, join='inner',add_index: bool =False, index_name: str ='Index')
     update_column_values(column_name: str, rename_values)
+    weighted_features (self,features:list[str],weight: int)
+    stand_scaler (self, first_column: Optional[str] = None, last_column: str =None)
     minmax_norm(first_column: str =None, last_column: str =None)
     quant_scaler(first_column: str =None, last_column: str =None)
     umap(nn: int, mdist: float, met: str)
@@ -48,6 +51,7 @@ Functions:
              hover_tooltips: list[tuple[str, str]] = None, show_legend: bool = False, point_size: int, point_alpha: float, show_axes: bool = False, title_align: str = 'center') -> None:
     lin_plot(outputf: str, feature: str, colors: list[str], fig_width: int, fig_height: int, fig_title: str, label_x: str, label_y: str, range_x: list[float], range_y: list[float],
              hover_tooltips: list[tuple[str, str]] = None, show_legend: bool = False, point_size: int, point_alpha: float, show_axes: bool = True, title_align: str = 'center') -> None:
+    cell_plot(self, cluster_column, top_clusters: int, palette, ID, x_label, y_label, png: bool, svg: bool,name: str):
 
 variables:
 
@@ -55,30 +59,29 @@ variables:
 
 """
 
-
-
 # Import Packages
 
 import flowkit as fk
 import pandas as pd
 import numpy as np
+import os
 from matplotlib import pyplot as plt
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler, QuantileTransformer
+from sklearn.preprocessing import MinMaxScaler, QuantileTransformer, StandardScaler
 from sklearn.metrics import r2_score
 import sklearn.cluster as cluster
 from sklearn.mixture import GaussianMixture
 import umap
 import hdbscan
-from bokeh.models import  (HoverTool,
-                           ColumnDataSource,
-                           Range1d,
-                           LinearColorMapper,
-                           CategoricalColorMapper)
+from bokeh.models import (HoverTool,
+                          ColumnDataSource,
+                          Range1d,
+                          LinearColorMapper,
+                          CategoricalColorMapper)
 from bokeh.plotting import figure, show, output_file
 import bokeh
-
+from adjustText import adjust_text
 from typing import Optional
 
 bokeh_version = bokeh.__version__
@@ -86,7 +89,6 @@ bokeh_above_three = int(bokeh_version.split(".")[0]) >= 3
 
 
 class MM:
-
     """\
     A class to create interactive dimensionality reduction plots.
     Based on pandas DataFrame.
@@ -101,8 +103,6 @@ class MM:
     None
 
     """
-
-
 
     def __init__(self):
         self.df = pd.DataFrame()
@@ -125,7 +125,7 @@ class MM:
         """
         try:
             if not csv_path:
-                 raise ValueError("The CSV path is empty or invalid.")
+                raise ValueError("The CSV path is empty or invalid.")
 
             sample = fk.Sample(fcs_path)
             sample.export(filename=csv_path, source='raw')
@@ -139,7 +139,7 @@ class MM:
             print(f"Conversion failed: {e}")
             raise
 
-    def read_CSV(self, path: str, add_index: bool =False, index_name: str ='Index'):
+    def read_CSV(self, path: str, add_index: bool = False, index_name: str = 'Index'):
         """\
         Load csv-file and save it as self.df
 
@@ -160,7 +160,7 @@ class MM:
 
         self.df = pd.read_csv(path)
 
-        #rename columns
+        # rename columns
         self.df.columns = (
             self.df.columns.str.strip()
             .str.replace(' ', '_')
@@ -173,6 +173,52 @@ class MM:
             self.df[index_name] = range(len(self.df))
             self.df.set_index(index_name, inplace=True)
 
+        return self.df
+
+    def read_files(self, path: str, add_index: bool = False, index_name: str = 'Index', join: str = 'outer'):
+        """\
+        read all csv-files in the given folder
+
+        Parameters
+        ----------
+        path
+            path to csv file
+        add_index
+            add index to df
+        index_name
+            set name of index
+        join
+            join df ('inner,'outer')
+
+        Returns
+        ----------
+        DataFrame
+        """
+
+        dfs = []
+
+        for file in os.listdir(path):
+            if file.lower().endswith('.csv'):
+                file_path = os.path.join(path, file)
+                df = self.read_CSV(file_path, add_index=False)
+                df['file'] = file
+                dfs.append(df)
+
+        if not dfs:
+            print(f"No CSV files found in: {path}")
+            self.df = pd.DataFrame()
+            return self.df
+
+        combined_df = pd.concat(dfs, ignore_index=True, join=join)
+
+        if add_index:
+            combined_df[index_name] = range(len(combined_df))
+            combined_df.set_index(index_name, inplace=True)
+
+        columns = [col for col in combined_df.columns if col != 'file'] + ['file']
+        combined_df = combined_df[columns]
+
+        self.df = combined_df
         return self.df
 
     def get_features(self):
@@ -387,22 +433,30 @@ class MM:
         self.df.to_csv(path, index=False)
         print(f"DataFrame successfully saved to {path}")
 
-    def concat_df(self, *new_df, join='inner'):
+    def concat_df(self, *new_df, join='inner', add_index: bool = False, index_name: str = 'Index'):
         """\
-        concatenate self.df and new DataFrame(s) (joining inner by default)
+        concatenate self.df and new dfs (joining inner by default)
 
         Parameters
         ----------
         new_df
-            DataFrames that should be concatenated
+            df that should be concatenated
         join
-            type of joining DataFrames
+            type of joining
+        add_index
+            add index to df
+        index_name
+            set name of index
 
         Returns
         ----------
         None
         """
-        self.df = pd.concat([self.df, *new_df], join=join)
+        self.df = pd.concat([self.df, *new_df], join=join,ignore_index=True)
+
+        if add_index:
+            self.df[index_name] = range(len(self.df))
+            self.df.set_index(index_name, inplace=True)
 
     def update_column_values(self, column_name: str, rename_values):
         """\
@@ -428,7 +482,71 @@ class MM:
         for original_value, new_value in rename_values.items():
             self.df[column_name] = self.df[column_name].str.replace(str(original_value), new_value)
 
-    def minmax_norm(self, first_column: Optional[str] = None, last_column: str =None):
+    def weighted_features(self, features: list[str], weight: int):
+        """\
+
+        Parameters
+        ----------
+        features
+            list of features
+        weight
+            factor for weighted features
+
+        Returns
+        ---------
+        df
+
+        """
+        for feature in features:
+            self.df[feature] = self.df[feature] * weight
+
+        return self.df
+
+    def stand_scaler(self, first_column: Optional[str] = None, last_column: Optional[str] = None):
+        """
+        Apply Standard Scaler to specified columns of self.df.
+
+        Parameters
+        ----------
+        first_column : str or None
+            Name of the first column to scale.
+        last_column : str or None
+            Name of the last column to scale.
+
+        Returns
+        -------
+        None
+        """
+        if self.df is None or self.df.empty:
+            raise ValueError("DataFrame is empty or not set.")
+
+        if first_column is None or last_column is None:
+            df1 = self.df.select_dtypes(include="number")
+            columns = df1.columns
+        else:
+            if first_column not in self.df.columns:
+                raise ValueError(f"First column '{first_column}' does not exist.")
+            if last_column not in self.df.columns:
+                raise ValueError(f"Last column '{last_column}' does not exist.")
+
+            first_id = self.df.columns.get_loc(first_column)
+            last_id = self.df.columns.get_loc(last_column)
+
+            if first_id > last_id:
+                raise ValueError(f"First column '{first_column}' is after last column '{last_column}'.")
+
+            df1 = self.df.iloc[:, first_id:last_id + 1]
+            columns = df1.columns
+
+        if df1.empty:
+            raise ValueError("No numeric data found to scale.")
+
+        scaler = StandardScaler()
+        df2 = pd.DataFrame(scaler.fit_transform(df1), columns=columns, index=df1.index)
+
+        self.df.loc[:, columns] = df2.astype(float)
+
+    def minmax_norm(self, first_column: Optional[str] = None, last_column: str = None):
         """\
         Apply MinMax normalization to self.df.
         Specify whether all columns should be normalized by setting parameters.
@@ -437,7 +555,7 @@ class MM:
         ----------
         first_column
             name of first column. Start of normalization.
-        last_column:
+        last_column
             name of last column. End of normalization.
 
         Returns
@@ -446,7 +564,7 @@ class MM:
 
         """
 
-        #check df
+        # check df
         if first_column is None or last_column is None:
             df1 = self.df
         else:
@@ -471,8 +589,7 @@ class MM:
         else:
             self.df = df
 
-
-    def quant_scaler(self, first_column: Optional[str] = None, last_column: str =None):
+    def quant_scaler(self, first_column: Optional[str] = None, last_column: str = None):
         """\
         Apply  QuantileTransformer to self.df.
         Specify whether all columns should be normalized by setting parameters.
@@ -507,14 +624,13 @@ class MM:
         # Apply Quantile Transformation
         scaler = QuantileTransformer(output_distribution='uniform')
         df2 = pd.DataFrame(scaler.fit_transform(df1),
-                                        columns=df1.columns,
-                                        index=df1.index)
+                           columns=df1.columns,
+                           index=df1.index)
 
         if first_column is not None and last_column is not None:
             self.df.iloc[:, first_id:last_id + 1] = df2
         else:
             self.df = df2
-
 
     def umap(self, nn: int, mdist: float, met: str):
         """\
@@ -604,7 +720,7 @@ class MM:
         data = self.df.copy()
         data = data.drop(indep, axis=1)
 
-        #split data
+        # split data
         train_df, test_df = train_test_split(data, test_size=0.2, random_state=42)
 
         X_train = train_df.drop(dep, axis=1)
@@ -649,8 +765,7 @@ class MM:
              'percentage_importance': percentage_importance[s_id]})
         return features
 
-
-    def plot_feature_importance(self, features, path: str, base_width: int =10, base_height: int =6):
+    def plot_feature_importance(self, features, path: str, base_width: int = 10, base_height: int = 6):
         """\
         Plots the ten most important features and returns a pyplot.
         Needs the ten top features and their importances as parameters.
@@ -687,7 +802,7 @@ class MM:
         plt.xlabel('')
         plt.ylabel('Importance', fontsize=20)
 
-        #adjust text height
+        # adjust text height
         for i, v in enumerate(features['percentage_importance']):
             if features['importance_normalized'][i] + 0.01 > 1.1:
                 text_height = 1
@@ -728,7 +843,7 @@ class MM:
 
         kmeans_labels = cluster.KMeans(n_clusters=n_cluster).fit_predict(self.df)
 
-        #plot
+        # plot
         plt.style.use('seaborn-v0_8-poster')
         plt.figure(figsize=(6, 6))
 
@@ -773,7 +888,7 @@ class MM:
         gmm.fit(self.df)
         gaussian_labels = gmm.predict(self.df)
 
-        #plot
+        # plot
         plt.style.use('seaborn-v0_8-poster')
         plt.figure(figsize=(6, 6))
 
@@ -847,8 +962,6 @@ class MM:
         return plt.show()
 
 
-
-    #def for dmap/umap plots
 
     def check_dataframe(self):
         """\
@@ -984,7 +1097,7 @@ class MM:
 
         """
 
-       #axes
+        # axes
         if not show_axes:
             plot.xaxis.visible = False
             plot.yaxis.visible = False
@@ -1010,7 +1123,6 @@ class MM:
             plot.add_layout(plot.legend[0], 'center')
         else:
             plot.legend.visible = False
-
 
     def cat_plot(self, feature: str,
                  subs: list[str],
@@ -1125,7 +1237,6 @@ class MM:
                  show_axes: bool = True,
                  title_align: str = 'center') -> None:
 
-
         """\
         Create plot with Linear color mapper.Choose feature, colors and more.
         Loads html file.
@@ -1171,7 +1282,6 @@ class MM:
 
         """
 
-
         self.check_dataframe()
         output_file(outputf)
 
@@ -1204,17 +1314,135 @@ class MM:
 
         show(plot)
 
+    def cell_plot(self,
+                  cluster_column,
+                  top_clusters: int,
+                  palette,
+                  ID,
+                  x_label,
+                  y_label,
+                  png: bool,
+                  svg: bool,
+                  name: str):
+        """\
+        Create plot with highlighted IDs.Save as png or svg.
 
+        Parameters
+        ----------
+        cluster_column
+            column with cluster numbers
+        top_clusters
+            number of top clusters that should be highlighted
+        palette
+            colours for top clusters
+        ID
+            IDs of cells of interest
+        x_label
+            label for x-axis
+        y_label
+            label for y-axis
+        png
+            saved as .png if True
+        svg
+            saved as.svg if True
+        name
+            name of file
 
+        Returns
+        --------
+        None
 
+        """
+        if cluster_column not in self.df.columns:
+            raise ValueError(f"Cluster column '{cluster_column}' not found in DataFrame.")
 
+        # identify most frequent clusters
+        top_clusters = self.df[cluster_column].value_counts().index[:top_clusters]
 
+        cluster_dtype = self.df[cluster_column].dtype
 
+        if np.issubdtype(cluster_dtype, np.number):
+                other_label = -1
+        else:
+                other_label = 'Other'
 
+        self.df["cluster_limited"] = self.df[cluster_column].apply(lambda x: x if x in top_clusters else other_label)
+        
 
+        unique_clusters = np.sort(self.df["cluster_limited"].unique())
+        cluster_colors = {cluster: palette[i] for i, cluster in enumerate(unique_clusters)}
+        colors = self.df["cluster_limited"].map(cluster_colors)
 
+        # Check which IDs are in the DataFrame
+        existing_ids = [idx for idx in ID if idx in self.df.index]
+        missing_ids = [idx for idx in ID if idx not in self.df.index]
 
+        # Select Highlighted Cells
+        highlight_cells = self.df.loc[existing_ids] if existing_ids else None
 
+        # Plot
+        plt.figure(figsize=(10, 8))
 
+        # Scatter Plot for All Cells
+        plt.scatter(
+            self.df["x"],
+            self.df["y"],
+            c=colors,
+            alpha=0.5,
+            s=50
+        )
 
+        # Highlight Specific IDs (Larger, Red, Black Border)
+        if highlight_cells is not None:
+            plt.scatter(
+                highlight_cells["x"],
+                highlight_cells["y"],
+                c="red",
+                edgecolors="black",
+                s=200
+            )
 
+            # Adjust Label Positions to Prevent Overlap
+            texts = []
+
+            for idx, row in highlight_cells.iterrows():
+                texts.append(plt.text(
+                    row["x"], row["y"], str(idx),
+                    fontsize=10, fontweight="bold",
+                    color="black", ha="center", va="center",
+                    bbox=dict(facecolor="white", edgecolor="black", boxstyle="round,pad=0.3")
+                ))
+
+            # Automatically Adjust Text Labels to Avoid Overlaps
+            adjust_text(texts, arrowprops=dict(arrowstyle="-", color="gray", lw=0.5))
+
+        # Axis Labels
+        plt.xlabel(x_label, fontsize=14)
+        plt.ylabel(y_label, fontsize=14)
+
+        # Cluster Legend (Without Highlighted Dots)
+        legend_labels = [
+            plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=cluster_colors[cl], markersize=10,
+                       label=f'Cluster {cl}' if cl != -1 else 'Other')
+            for cl in unique_clusters
+        ]
+
+        plt.legend(handles=legend_labels, loc="upper right", fontsize=10)
+
+        if svg is True:
+            svg_filename = name + ".svg"
+            plt.savefig(svg_filename, format="svg", bbox_inches="tight", dpi=300)
+            print(f" plot saved as: {svg_filename}")
+            plt.show()
+
+        if png is True:
+            png_filename = name + ".png"
+            plt.savefig(png_filename, format="png", bbox_inches="tight", dpi=300)
+            print(f" plot saved as: {png_filename}")
+            plt.show()
+
+        if png is False and svg is False:
+            print("unable to save plot")
+
+        if missing_ids:
+            print(f" The following highlight IDs were not found in the dataset: {missing_ids}")

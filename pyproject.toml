@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "morphomapping"
-version = "0.0.7"
+version = "0.0.8"
 authors = [
   { name="Amelie Bauerdick", email="Amelie.Bauerdick@stud.uni-heidelberg.de" },
 ]
@@ -27,7 +27,8 @@ dependencies = [
     "umap-learn",
     "hdbscan", # TODO Check if ambiguous with sklearn implementation.
     "bokeh",
-    "openpyxl"
+    "openpyxl",
+    "adjustText"
 ]
 
 [project.optional-dependencies]
