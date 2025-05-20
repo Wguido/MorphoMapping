@@ -73,6 +73,8 @@ and run the notebook by entering `jupyter-notebook` into the terminal.
 | `pandas` | 
 | `scikit-learn` | 
 | `umap-learn` | 
+| `openpyxl` |
+| `adjustText` |
 
 * The following R libraries (R V.4.2.1)  are required for MorphoMapping's optional DAFtoFCS-Converter and the Cluster Analysis:
   
