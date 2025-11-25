@@ -1,433 +1,432 @@
-# MorphoMapping GUI - Benutzerhandbuch
+# MorphoMapping GUI - User Guide
 
-## 📖 Einführung
+## 📖 Introduction
 
-Willkommen beim MorphoMapping GUI! Diese Anleitung führt Sie Schritt für Schritt durch die Verwendung der Anwendung.
+Welcome to the MorphoMapping GUI! This guide walks you through using the application step by step.
 
-### Was ist MorphoMapping GUI?
+### What is MorphoMapping GUI?
 
-MorphoMapping GUI ist eine Desktop-Anwendung zur Analyse von ImageStream-Daten (.daf Dateien). Sie ermöglicht:
+MorphoMapping GUI is a desktop application for analyzing ImageStream data (.daf files). It enables:
 
-- Dimensionsreduktion (DensMAP, UMAP, t-SNE)
+- Dimensionality reduction (DensMAP, UMAP, t-SNE)
 - Clustering (KMeans, GMM, HDBSCAN)
-- Visualisierung und Export von Ergebnissen
-- Feature-Analyse und Cluster-Statistiken
+- Visualization and export of results
+- Feature analysis and cluster statistics
 
-### Systemanforderungen
+### System Requirements
 
-- Python 3.10 oder 3.11
-- R 4.0 oder neuer
-- 8 GB RAM (16 GB empfohlen)
-- macOS 10.15+, Windows 10+, oder Linux
+- Python 3.10 or 3.11
+- R 4.0 or newer
+- 8 GB RAM (16 GB recommended)
+- macOS 10.15+, Windows 10+, or Linux
 
 ---
 
-## 🚀 Erste Schritte
+## 🚀 Getting Started
 
 ### 1. Installation
 
-Folgen Sie der **[INSTALLATION.md](INSTALLATION.md)** Anleitung, um die GUI zu installieren.
+Follow the **[INSTALLATION.md](INSTALLATION.md)** guide to install the GUI.
 
-### 2. GUI starten
+### 2. Start GUI
 
 ```bash
 conda activate morphomapping
 cd Documentation/Bundle/gui
-python app_pyside6.py
+python morphomapping_gui.py
 ```
 
-Ein Fenster sollte sich öffnen.
+A window should open.
 
 ---
 
-## 📋 Schritt-für-Schritt Workflow
+## 📋 Step-by-Step Workflow
 
-### Schritt 1: Projekt Setup
+### Step 1: Project Setup
 
-#### Run-ID setzen
+#### Set Run-ID
 
-1. Finden Sie das Feld **"Run-ID"** oben links
-2. Geben Sie eine eindeutige ID ein (z.B. `experiment_2025_01_25`)
-3. Die Run-ID wird für alle Ausgabedateien verwendet
+1. Find the **"Run-ID"** field at the top left
+2. Enter a unique ID (e.g., `experiment_2025_01_25`)
+3. The Run-ID is used for all output files
 
-#### Projektverzeichnis wählen (Optional)
+#### Choose Project Directory (Optional)
 
-1. Klicken Sie auf **"📁 Choose Project Directory"**
-2. Wählen Sie einen Ordner, in dem Ihre Ergebnisse gespeichert werden sollen
-3. Standard: `bundle_runs/` im MorphoMapping Ordner
+1. Click **"📁 Choose Project Directory"**
+2. Select a folder where your results should be saved
+3. Default: `bundle_runs/` in the MorphoMapping folder
 
-**Tipp:** Verwenden Sie aussagekräftige Run-IDs wie `neutrophils_day1` oder `experiment_control_vs_treated`.
+**Tip:** Use meaningful Run-IDs like `neutrophils_day1` or `experiment_control_vs_treated`.
 
 ---
 
-### Schritt 2: DAF-Dateien laden
+### Step 2: Load DAF Files
 
-#### Option A: Dateiauswahl-Dialog
+#### Option A: File Selection Dialog
 
-1. Klicken Sie auf **"📁 Select DAF Files"**
-2. Wählen Sie eine oder mehrere .daf Dateien aus
-3. Klicken Sie auf "Öffnen"
+1. Click **"📁 Select DAF Files"**
+2. Select one or more .daf files
+3. Click "Open"
 
 #### Option B: Drag & Drop
 
-1. Ziehen Sie .daf Dateien direkt in das **"📁 Drop DAF files here"** Feld
-2. Die Dateien werden automatisch erkannt
+1. Drag .daf files directly into the **"📁 Drop DAF files here"** field
+2. Files are automatically detected
 
-#### Was passiert?
+#### What Happens?
 
-- Die .daf Dateien werden zu .fcs Dateien konvertiert
-- Ein Fortschrittsbalken zeigt den Status
-- Nach der Konvertierung erscheinen die Dateien in der Status-Übersicht
+- The .daf files are converted to .fcs files
+- A progress bar shows the status
+- After conversion, files appear in the status overview
 
-**Hinweis:** Große Dateien (100-500 MB) können einige Minuten dauern. Bitte haben Sie Geduld.
-
----
-
-### Schritt 3: Metadaten eingeben
-
-#### Option A: Manuelle Eingabe (Links)
-
-1. Die Tabelle zeigt automatisch die geladenen Dateien
-2. **file_name**: Wird automatisch ausgefüllt
-3. **sample_id**: Wird automatisch nummeriert (`sample_1`, `sample_2`, etc.)
-4. **group**: Geben Sie Ihre Gruppen ein (z.B. `control`, `treated`)
-5. **replicate**: Geben Sie Replikat-Nummern ein (z.B. `1`, `2`, `3`)
-
-**Tipp:** Sie können die Tabelle scrollen, wenn Sie viele Dateien haben.
-
-#### Option B: CSV/Excel Upload (Rechts)
-
-1. Klicken Sie auf **"📤 Upload Metadata"**
-2. Wählen Sie eine CSV oder Excel-Datei
-3. Die Metadaten werden automatisch geladen
-
-**Erforderliche Spalten:**
-- `file_name`: Name der .daf/.fcs Datei (ohne Endung)
-- `sample_id`: Eindeutige Sample-ID (optional, wird auto-generiert)
-- `group`: Experimentelle Gruppe (z.B. `control`, `treated`)
-- `replicate`: Replikat-Nummer (optional)
-
-#### Metadaten speichern
-
-1. Klicken Sie auf **"💾 Save Metadata"**
-2. Der Status ändert sich zu "✅ Saved"
-
-**WICHTIG:** Speichern Sie die Metadaten, bevor Sie mit der Analyse beginnen!
+**Note:** Large files (100-500 MB) can take several minutes. Please be patient.
 
 ---
 
-### Schritt 4: Features auswählen
+### Step 3: Enter Metadata
 
-#### Features einbeziehen (Include)
+#### Option A: Manual Entry (Left)
 
-1. Scrollen Sie zur Sektion **"4️⃣ Features & Gates Selection"**
-2. Im **"Features to Include"** Bereich sehen Sie blaue Chips
-3. Klicken Sie auf einen Chip, um ihn zu entfernen (wird zu "Exclude")
-4. Klicken Sie erneut, um ihn wieder hinzuzufügen
+1. The table automatically shows the loaded files
+2. **file_name**: Automatically filled
+3. **sample_id**: Automatically numbered (`sample_1`, `sample_2`, etc.)
+4. **group**: Enter your groups (e.g., `control`, `treated`)
+5. **replicate**: Enter replicate numbers (e.g., `1`, `2`, `3`)
 
-**Tipp:** Die ersten 10 Features sind sichtbar. Klicken Sie auf **"▶ Show All"**, um alle zu sehen.
+**Tip:** You can scroll the table if you have many files.
 
-#### Features ausschließen (Exclude)
+#### Option B: CSV/Excel Upload (Right)
 
-1. Im **"Features to Exclude"** Bereich sehen Sie rote Chips
-2. Klicken Sie auf einen Chip, um ihn zu entfernen (wird zu "Include")
-3. Klicken Sie erneut, um ihn wieder auszuschließen
+1. Click **"📤 Upload Metadata"**
+2. Select a CSV or Excel file
+3. Metadata is automatically loaded
 
-**Hinweis:** Features, die nicht in allen Dateien vorhanden sind, werden automatisch ausgeschlossen.
+**Required Columns:**
+- `file_name`: Name of the .daf/.fcs file (without extension)
+- `sample_id`: Unique sample ID (optional, auto-generated)
+- `group`: Experimental group (e.g., `control`, `treated`)
+- `replicate`: Replicate number (optional)
 
-#### Population/Gate auswählen
+#### Save Metadata
 
-1. Wählen Sie eine Population aus dem Dropdown-Menü
-2. Nur Zellen aus dieser Population werden analysiert
+1. Click **"💾 Save Metadata"**
+2. Status changes to "✅ Saved"
 
-**Tipp:** Wählen Sie eine Population, die in allen Dateien vorhanden ist.
+**IMPORTANT:** Save metadata before starting the analysis!
 
 ---
 
-### Schritt 5: Dimensionsreduktion
+### Step 4: Select Features
 
-#### Methode wählen
+#### Include Features
 
-1. Scrollen Sie zur Sektion **"5️⃣ Dimensionality Reduction"**
-2. Wählen Sie eine Methode:
-   - **DensMAP** (Standard, empfohlen)
+1. Scroll to the **"4️⃣ Features & Gates Selection"** section
+2. In the **"Features to Include"** area, you'll see blue chips
+3. Click a chip to remove it (moves to "Exclude")
+4. Click again to add it back
+
+**Tip:** The first 10 features are visible. Click **"▶ Show All"** to see all of them.
+
+#### Exclude Features
+
+1. In the **"Features to Exclude"** area, you'll see red chips
+2. Click a chip to remove it (moves to "Include")
+3. Click again to exclude it
+
+**Note:** Features that aren't present in all files are automatically excluded.
+
+#### Select Population/Gate
+
+1. Choose a population from the dropdown menu
+2. Only cells from this population will be analyzed
+
+**Tip:** Choose a population that exists in all files.
+
+---
+
+### Step 5: Dimensionality Reduction
+
+#### Choose Method
+
+1. Scroll to the **"5️⃣ Dimensionality Reduction"** section
+2. Select a method:
+   - **DensMAP** (default, recommended)
    - **UMAP**
    - **t-SNE**
 
-#### Parameter anpassen
+#### Adjust Parameters
 
-Je nach Methode sehen Sie verschiedene Slider:
+Depending on the method, you'll see different sliders:
 
 **DensMAP:**
-- **Dens Lambda**: Dichte-Regularisierung (Standard: 2.0)
-- **N Neighbors**: Anzahl Nachbarn (Standard: 30)
-- **Min Dist**: Minimale Distanz (Standard: 0.1)
+- **Dens Lambda**: Density regularization (default: 2.0)
+- **N Neighbors**: Number of neighbors (default: 30)
+- **Min Dist**: Minimum distance (default: 0.1)
 
 **UMAP:**
-- **N Neighbors**: Anzahl Nachbarn (Standard: 30)
-- **Min Dist**: Minimale Distanz (Standard: 0.1)
+- **N Neighbors**: Number of neighbors (default: 30)
+- **Min Dist**: Minimum distance (default: 0.1)
 
 **t-SNE:**
-- **Perplexity**: Perplexity-Parameter (Standard: 30.0)
+- **Perplexity**: Perplexity parameter (default: 30.0)
 
 #### Sampling (Optional)
 
-- **Max cells per sample**: Begrenzt die Anzahl analysierter Zellen pro Probe
-- Nützlich für sehr große Datensätze
-- 0 = Alle Zellen analysieren
+- **Max cells per sample**: Limits the number of analyzed cells per sample
+- Useful for very large datasets
+- 0 = Analyze all cells
 
-#### Analyse starten
+#### Start Analysis
 
-1. Klicken Sie auf **"▶ Run Analysis"**
-2. Ein Fortschrittsbalken erscheint
-3. Die Analyse kann einige Minuten dauern (abhängig von Datenmenge)
+1. Click **"▶ Run Analysis"**
+2. A progress bar appears
+3. Analysis can take several minutes (depending on data size)
 
-**Nach Abschluss:**
-- Ein Plot erscheint in der **"6️⃣ Visualization"** Sektion
-- Der **"📊 Download Top10 Features"** Button wird aktiv
-- Die **"7️⃣ Clustering"** Sektion wird sichtbar
-
----
-
-### Schritt 6: Visualisierung
-
-#### Farbcodierung ändern
-
-1. In der **"6️⃣ Visualization"** Sektion finden Sie das Dropdown **"Color by"**
-2. Wählen Sie eine Option:
-   - `sample_id`: Nach Probe färben
-   - `group`: Nach Gruppe färben
-   - `replicate`: Nach Replikat färben
-   - Andere Metadaten-Spalten
-
-**Tipp:** Der Plot aktualisiert sich automatisch, ohne Neuberechnung!
-
-#### Achsen-Limits anpassen
-
-1. Geben Sie Werte in die Felder ein:
-   - **X Min / X Max**: X-Achse Limits
-   - **Y Min / Y Max**: Y-Achse Limits
-2. Klicken Sie auf **"Apply Limits"**
-3. Klicken Sie auf **"Reset"**, um zurückzusetzen
-
-**Verwendung:** Nützlich, um Ausreißer auszublenden oder bestimmte Bereiche zu fokussieren.
-
-#### Zellen hervorheben
-
-1. Geben Sie Zell-Indizes in das Feld **"Cell Indices"** ein (komma-separiert, z.B. `1, 5, 10`)
-2. Klicken Sie auf **"✨ Highlight"**
-3. Die Zellen werden als rote Sterne markiert
-
-**Tipp:** Sie können mehrere Zellen gleichzeitig hervorheben.
-
-#### Plot exportieren
-
-1. Klicken Sie auf **"📥 Export PNG"** oder **"📥 Export PDF"**
-2. Wählen Sie einen Speicherort
-3. Die Datei wird mit 300 DPI gespeichert
+**After Completion:**
+- A plot appears in the **"6️⃣ Visualization"** section
+- The **"📊 Download Top10 Features"** button becomes active
+- The **"7️⃣ Clustering"** section becomes visible
 
 ---
 
-### Schritt 7: Clustering
+### Step 6: Visualization
 
-#### Algorithmus wählen
+#### Change Color Coding
 
-1. Scrollen Sie zur Sektion **"7️⃣ Clustering"**
-2. Wählen Sie einen Algorithmus:
-   - **KMeans**: Exakte Anzahl Cluster (Standard: 10)
-   - **Gaussian Mixture Models (GMM)**: Probabilistisches Clustering
-   - **HDBSCAN**: Dichte-basiertes Clustering
+1. In the **"6️⃣ Visualization"** section, find the **"Color by"** dropdown
+2. Select an option:
+   - `sample_id`: Color by sample
+   - `group`: Color by group
+   - `replicate`: Color by replicate
+   - Other metadata columns
 
-#### Parameter anpassen
+**Tip:** The plot updates automatically without recalculation!
 
-Die Parameter ändern sich je nach Algorithmus:
+#### Adjust Axis Limits
+
+1. Enter values in the fields:
+   - **X Min / X Max**: X-axis limits
+   - **Y Min / Y Max**: Y-axis limits
+2. Click **"Apply Limits"**
+3. Click **"Reset"** to reset
+
+**Usage:** Useful to hide outliers or focus on specific areas.
+
+#### Highlight Cells
+
+1. Enter cell indices in the **"Cell Indices"** field (comma-separated, e.g., `1, 5, 10`)
+2. Click **"✨ Highlight"**
+3. Cells are marked as red stars
+
+**Tip:** You can highlight multiple cells at once.
+
+#### Export Plot
+
+1. Click **"📥 Export PNG"** or **"📥 Export PDF"**
+2. Choose a save location
+3. File is saved with 300 DPI
+
+---
+
+### Step 7: Clustering
+
+#### Choose Algorithm
+
+1. Scroll to the **"7️⃣ Clustering"** section
+2. Select an algorithm:
+   - **KMeans**: Exact number of clusters (default: 10)
+   - **Gaussian Mixture Models (GMM)**: Probabilistic clustering
+   - **HDBSCAN**: Density-based clustering
+
+#### Adjust Parameters
+
+Parameters change depending on the algorithm:
 
 **KMeans:**
-- **N Clusters**: Anzahl Cluster (Standard: 10)
-- **📊 Download Elbow Plot**: Zeigt optimale Cluster-Anzahl
+- **N Clusters**: Number of clusters (default: 10)
+- **📊 Download Elbow Plot**: Shows optimal cluster number
 
 **GMM:**
-- **N Clusters**: Anzahl Cluster (Standard: 10)
-- **Covariance Type**: Kovarianz-Typ (Standard: `full`)
+- **N Clusters**: Number of clusters (default: 10)
+- **Covariance Type**: Covariance type (default: `full`)
 
 **HDBSCAN:**
-- **Min Cluster Size**: Minimale Clustergröße (Standard: automatisch)
-- **Min Samples**: Minimale Samples (Standard: 10)
+- **Min Cluster Size**: Minimum cluster size (default: automatic)
+- **Min Samples**: Minimum samples (default: 10)
 
-#### Clustering starten
+#### Start Clustering
 
-1. Klicken Sie auf **"▶ Run Clustering"**
-2. Ein Fortschrittsbalken erscheint
-3. Nach Abschluss erscheint:
-   - Ein Cluster-Plot
-   - Eine Cluster-Statistik-Tabelle
-   - Export-Buttons
+1. Click **"▶ Run Clustering"**
+2. A progress bar appears
+3. After completion, you'll see:
+   - A cluster plot
+   - A cluster statistics table
+   - Export buttons
 
-#### Cluster-Statistiken
+#### Cluster Statistics
 
-Die Tabelle zeigt:
-- **Cluster**: Cluster-ID
-- **Size**: Anzahl Zellen im Cluster
-- **Percentage**: Prozentuale Verteilung
-- **Sample Distribution**: Verteilung über Samples
+The table shows:
+- **Cluster**: Cluster ID
+- **Size**: Number of cells in cluster
+- **Percentage**: Percentage distribution
+- **Sample Distribution**: Distribution across samples
 
-#### Cluster-Plot exportieren
+#### Export Cluster Plot
 
-1. Klicken Sie auf **"📥 Export PNG"** oder **"📥 Export PDF"**
-2. Die Achsen-Limits werden übernommen
+1. Click **"📥 Export PNG"** or **"📥 Export PDF"**
+2. Axis limits are applied
 
-#### Cluster-Statistiken exportieren
+#### Export Cluster Statistics
 
-1. Klicken Sie auf **"📊 Export Bar Chart"**
-2. Erstellt einen gestapelten Bar Chart nach Groups
-3. Speichert als PNG
+1. Click **"📊 Export Bar Chart"**
+2. Creates a stacked bar chart by groups
+3. Saves as PNG
 
-**Hinweis:** Erfordert eine `group` Spalte in den Metadaten!
+**Note:** Requires a `group` column in metadata!
 
 ---
 
-### Schritt 8: Erweiterte Analyse
+### Step 8: Advanced Analysis
 
-#### Top 3 Features pro Cluster
+#### Top 3 Features per Cluster
 
-1. Nach dem Clustering finden Sie den Button **"🔍 Top 3 Features per Cluster"**
-2. Klicken Sie darauf
-3. Eine CSV-Datei wird erstellt mit:
-   - Cluster-ID
-   - Top 1, 2, 3 Features und deren Werte
+1. After clustering, find the **"🔍 Top 3 Features per Cluster"** button
+2. Click it
+3. A CSV file is created with:
+   - Cluster ID
+   - Top 1, 2, 3 features and their values
 
-**Speicherort:** `bundle_runs/run_YYYYMMDD_HHMMSS/results/top3_features_per_cluster.csv`
+**Location:** `bundle_runs/run_YYYYMMDD_HHMMSS/results/top3_features_per_cluster.csv`
 
 #### Cluster-Feature Heatmap
 
-1. Klicken Sie auf **"🔥 Cluster-Feature Heatmap"**
-2. Erstellt eine Heatmap mit:
-   - **Zeilen**: Features
-   - **Spalten**: Cluster
-   - **Werte**: Row-wise Z-Score
-3. Speichert:
+1. Click **"🔥 Cluster-Feature Heatmap"**
+2. Creates a heatmap with:
+   - **Rows**: Features
+   - **Columns**: Clusters
+   - **Values**: Row-wise Z-score
+3. Saves:
    - PNG: `cluster_feature_heatmap.png`
    - CSV: `cluster_feature_heatmap_data.csv`
 
-**Verwendung:** Identifiziert charakteristische Features pro Cluster.
+**Usage:** Identifies characteristic features per cluster.
 
 #### Top 10 Features
 
-1. Nach der Dimensionsreduktion finden Sie **"📊 Download Top10 Features"**
-2. Klicken Sie darauf
-3. Berechnet die wichtigsten Features für X- und Y-Dimensionen
-4. Speichert:
+1. After dimensionality reduction, find **"📊 Download Top10 Features"**
+2. Click it
+3. Calculates the most important features for X and Y dimensions
+4. Saves:
    - CSV: `top10_features.csv`
    - Plots: `top10_features_x_dim.png`, `top10_features_y_dim.png`
 
-**Dauer:** Kann einige Minuten dauern für große Datensätze.
+**Duration:** Can take several minutes for large datasets.
 
 ---
 
-## 💡 Tipps & Tricks
+## 💡 Tips & Tricks
 
 ### Performance
 
-- **Sampling verwenden**: Bei sehr großen Datensätzen (>100.000 Zellen) verwenden Sie "Max cells per sample"
-- **Features reduzieren**: Weniger Features = schnellere Berechnung
-- **Population wählen**: Analysieren Sie nur relevante Populationen
+- **Use sampling**: For very large datasets (>100,000 cells), use "Max cells per sample"
+- **Reduce features**: Fewer features = faster calculation
+- **Choose population**: Analyze only relevant populations
 
-### Datenqualität
+### Data Quality
 
-- **Metadaten prüfen**: Stellen Sie sicher, dass `group` korrekt ausgefüllt ist
-- **Dateinamen konsistent**: `file_name` in Metadaten muss exakt mit Dateinamen übereinstimmen
-- **Features prüfen**: Stellen Sie sicher, dass alle wichtigen Features in allen Dateien vorhanden sind
+- **Check metadata**: Make sure `group` is filled correctly
+- **Consistent filenames**: `file_name` in metadata must exactly match filename
+- **Check features**: Make sure all important features are present in all files
 
-### Workflow-Optimierung
+### Workflow Optimization
 
-1. **Testen Sie zuerst mit wenigen Dateien** (2-3 Dateien)
-2. **Verwenden Sie Sampling** für erste Tests
-3. **Speichern Sie Metadaten** bevor Sie analysieren
-4. **Exportieren Sie Ergebnisse** regelmäßig
+1. **Test first with few files** (2-3 files)
+2. **Use sampling** for initial tests
+3. **Save metadata** before analyzing
+4. **Export results** regularly
 
 ---
 
-## ❓ Häufige Fragen (FAQ)
+## ❓ Frequently Asked Questions (FAQ)
 
-### Q: Die GUI startet nicht
+### Q: GUI won't start
 
-**A:** Überprüfen Sie:
-1. Python-Version: `python --version` (sollte 3.10 oder 3.11 sein)
-2. Environment aktiviert: `conda activate morphomapping`
-3. Dependencies installiert: `pip list | grep PySide6`
+**A:** Check:
+1. Python version: `python --version` (should be 3.10 or 3.11)
+2. Environment activated: `conda activate morphomapping`
+3. Dependencies installed: `pip list | grep PySide6`
 
 ### Q: "No module named 'morphomapping'"
 
-**A:** Installieren Sie das Paket:
+**A:** Install the package:
 ```bash
-cd /Pfad/zum/MorphoMapping
+cd /path/to/MorphoMapping
 pip install -e ./
 ```
 
-### Q: Metadaten werden nicht übernommen
+### Q: Metadata not being applied
 
-**A:** Überprüfen Sie:
-1. `file_name` in Metadaten entspricht exakt dem Dateinamen (ohne .fcs)
-2. Metadaten wurden gespeichert (Status zeigt "✅ Saved")
-3. Analyse wurde nach dem Speichern gestartet
+**A:** Check:
+1. `file_name` in metadata exactly matches filename (without .fcs)
+2. Metadata was saved (status shows "✅ Saved")
+3. Analysis was started after saving
 
-### Q: Plot ist leer oder grau
+### Q: Plot is empty or gray
 
-**A:** Überprüfen Sie:
-1. `sample_id` Spalte existiert und hat Werte
-2. Metadaten wurden korrekt mit Analyse-Daten verknüpft
-3. Versuchen Sie, "Color by" zu ändern
+**A:** Check:
+1. `sample_id` column exists and has values
+2. Metadata was correctly linked with analysis data
+3. Try changing "Color by"
 
-### Q: Clustering zeigt keine Ergebnisse
+### Q: Clustering shows no results
 
-**A:** Überprüfen Sie:
-1. Dimensionsreduktion wurde erfolgreich abgeschlossen
-2. Cluster-Algorithmus wurde ausgewählt
-3. Parameter sind sinnvoll (z.B. nicht zu viele Cluster für kleine Datensätze)
+**A:** Check:
+1. Dimensionality reduction completed successfully
+2. Cluster algorithm was selected
+3. Parameters are reasonable (e.g., not too many clusters for small datasets)
 
-### Q: Export funktioniert nicht
+### Q: Export doesn't work
 
-**A:** Überprüfen Sie:
-1. Ergebnisse wurden berechnet (Plot ist sichtbar)
-2. Schreibrechte im Ausgabeordner
-3. Genug Festplattenspeicher
+**A:** Check:
+1. Results were calculated (plot is visible)
+2. Write permissions in output folder
+3. Enough disk space
 
 ---
 
-## 🐛 Fehlerbehebung
+## 🐛 Troubleshooting
 
-### "Analysis failed" Fehler
+### "Analysis failed" Error
 
-1. Überprüfen Sie die Konsole/Terminal für detaillierte Fehlermeldungen
-2. Stellen Sie sicher, dass alle Dependencies installiert sind
-3. Überprüfen Sie, ob R installiert ist: `Rscript --version`
+1. Check console/terminal for detailed error messages
+2. Make sure all dependencies are installed
+3. Check if R is installed: `Rscript --version`
 
-### GUI friert ein
+### GUI Freezes
 
-1. Warten Sie - große Dateien können lange dauern
-2. Überprüfen Sie den Fortschrittsbalken
-3. Bei Bedarf neu starten (Fortschritt geht verloren)
+1. Wait - large files can take a long time
+2. Check the progress bar
+3. Restart if needed (progress will be lost)
 
-### Dateien werden nicht konvertiert
+### Files Not Converting
 
-1. Überprüfen Sie, ob R installiert ist
-2. Überprüfen Sie, ob Rscript im PATH ist
-3. Überprüfen Sie die Dateien - sind sie korrupt?
+1. Check if R is installed
+2. Check if Rscript is in PATH
+3. Check the files - are they corrupted?
 
 ---
 
 ## 📞 Support
 
-Bei Problemen:
+If you have problems:
 
-1. **Lesen Sie diese Anleitung** noch einmal durch
-2. **Überprüfen Sie die [INSTALLATION.md](INSTALLATION.md)** für Installationsprobleme
-3. **Erstellen Sie ein GitHub Issue**: https://github.com/Wguido/MorphoMapping/issues
-   - Beschreiben Sie das Problem
-   - Fügen Sie Fehlermeldungen hinzu
-   - Geben Sie Systeminformationen an
+1. **Read this guide** again
+2. **Check [INSTALLATION.md](INSTALLATION.md)** for installation issues
+3. **Create a GitHub Issue**: https://github.com/Wguido/MorphoMapping/issues
+   - Describe the problem
+   - Include error messages
+   - Provide system information
 
 ---
 
-**Letzte Aktualisierung:** 2025-01-25
-
+**Last Updated:** 2025-11-25
