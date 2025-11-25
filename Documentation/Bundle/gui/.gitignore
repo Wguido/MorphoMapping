@@ -1,0 +1,65 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Session cache
+session_cache/
+*.pkl
+*.json
+
+# Test outputs
+*.log
+debug.log
+gui_debug.log
+
+# Build outputs
+*.app
+*.exe
+*.dmg
+*.pkg
+
+# Temporary files
+*.tmp
+*.bak
+*.orig
+
+# Results (should not be in repo)
+bundle_runs/
+results/
+output/
+
+# Large files
+*.daf
+*.fcs
+*.csv
+*.parquet
+!**/test_data/**/*.csv
+
+# Documentation build
+docs/_build/
+site/
+
