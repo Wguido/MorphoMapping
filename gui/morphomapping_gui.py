@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
     QLabel, QPushButton, QLineEdit, QFileDialog, QComboBox, QSlider,
     QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView,
     QGroupBox, QMessageBox, QProgressBar, QTextEdit, QFrame,
-    QSizePolicy, QSpacerItem, QCheckBox
+    QSizePolicy, QSpacerItem, QCheckBox, QDialog, QTabWidget
 )
 
 try:
@@ -55,6 +55,7 @@ from core import (
     run_clustering as run_clustering_analysis,
     get_axis_labels,
 )
+from core.config import R_HEATMAP_SCRIPT
 from morphomapping.morphomapping import MM
 
 # Utility functions for robust path handling
@@ -346,6 +347,8 @@ class AnalysisWorker(QThread):
             self.session_state["metadata_df"] = metadata_df
             self.session_state["stored_dim_reduction_method"] = self.method
             self.session_state["selected_population"] = self.population
+            # Store file processing info (skipped_files, usable_files)
+            self.session_state["analysis_info"] = info
             
             # Save config
             run_config = {
@@ -379,9 +382,34 @@ class FeatureImportanceWorker(QThread):
         self.paths = paths
         self.population = population
     
+    @staticmethod
+    def _plot_feature_importance_static(features_df: pd.DataFrame, output_path: str, title: str):
+        """Plot feature importance manually (static method to avoid multiprocessing)."""
+        import matplotlib.pyplot as plt
+        import numpy as np
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        
+        # Sort by importance
+        features_df = features_df.sort_values('importance_normalized', ascending=True)
+        
+        # Create horizontal bar chart
+        y_pos = np.arange(len(features_df))
+        ax.barh(y_pos, features_df['importance_normalized'], color='steelblue')
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(features_df['index1'])
+        ax.set_xlabel('Normalized Importance', fontsize=12, fontweight='bold')
+        ax.set_title(f'Top 10 Features - {title}', fontsize=14, fontweight='bold')
+        ax.invert_yaxis()  # Highest importance at top
+        
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+    
     def run(self):
         try:
             import traceback
+            import numpy as np
             from morphomapping.morphomapping import MM
             
             # Load all data from CSV cache and combine with embedding
@@ -449,11 +477,23 @@ class FeatureImportanceWorker(QThread):
             # Since we can't directly match by index, we'll sample the same number of cells
             # from the embedding for each sample
             
-            # Group by sample_id and sample same number of cells from embedding
-            combined_with_coords = []
+            # More efficient merging: use cell_index if available, otherwise sample
             embedding_subset = self.embedding_df[["sample_id", "x", "y"]].copy()
             embedding_subset["sample_id"] = embedding_subset["sample_id"].astype(str)
             
+            # Try to merge on sample_id and cell_index if both have it
+            if "cell_index" in combined_data.columns and "cell_index" in embedding_subset.columns:
+                # Direct merge on sample_id and cell_index
+                combined_data["sample_id"] = combined_data["sample_id"].astype(str)
+                combined_data = combined_data.merge(
+                    embedding_subset,
+                    on=["sample_id", "cell_index"],
+                    how="inner",
+                    suffixes=("", "_emb")
+                )
+            else:
+                # Fallback: sample-based merging
+                combined_with_coords = []
             for sample_id in combined_data["sample_id"].unique():
                 sample_data = combined_data[combined_data["sample_id"] == sample_id].copy()
                 sample_embedding = embedding_subset[embedding_subset["sample_id"] == sample_id].copy()
@@ -481,11 +521,6 @@ class FeatureImportanceWorker(QThread):
             if len(combined_data) == 0:
                 self.finished.emit(False, "Could not merge embedding with data. Check sample_id matching.")
                 return
-            
-            # Sample if too large (to prevent memory issues)
-            max_rows = 50000
-            if len(combined_data) > max_rows:
-                combined_data = combined_data.sample(n=max_rows, random_state=42).reset_index(drop=True)
             
             # Validate data before creating MM object
             print(f"DEBUG: Combined data shape: {combined_data.shape}")
@@ -518,33 +553,339 @@ class FeatureImportanceWorker(QThread):
                 self.finished.emit(False, f"Not enough valid data points. Found: {len(combined_data_clean)} rows. Need at least 100 for reliable feature importance calculation.")
                 return
             
-            print(f"DEBUG: Clean data shape: {combined_data_clean.shape}, columns: {combined_data_clean.columns.tolist()}")
+            # ADAPTIVE SAMPLING: Set upper limit on total values (cells × features)
+            # This ensures that with many features (150-200), we use fewer cells, and vice versa
+            feature_cols = [c for c in combined_data_clean.columns if c not in ["x", "y"]]
+            num_features = len(feature_cols)
+            
+            # Upper limit: max_total_values = cells × features
+            # This keeps memory usage constant regardless of feature count
+            max_total_values = 10000  # Upper limit for total data points (cells × features)
+            
+            # Calculate max cells per sample based on number of features
+            # More features → fewer cells, fewer features → more cells
+            max_cells_per_sample = max_total_values // num_features
+            
+            # Set reasonable bounds:
+            # - Minimum: 50 cells per sample (for statistical validity)
+            # - Maximum: 200 cells per sample (to prevent excessive memory even with few features)
+            max_cells_per_sample = max(50, min(200, max_cells_per_sample))
+            
+            print(f"DEBUG: Found {num_features} features")
+            print(f"DEBUG: Calculated max_cells_per_sample = {max_total_values} / {num_features} = {max_total_values // num_features}")
+            print(f"DEBUG: After bounds: max_cells_per_sample = {max_cells_per_sample}")
+            print(f"DEBUG: Expected total values: ~{max_cells_per_sample} cells × {num_features} features = ~{max_cells_per_sample * num_features} values")
+            
+            # Sample per sample_id with adaptive cell count
+            sampled_data = []
+            for sample_id in combined_data["sample_id"].unique():
+                sample_data = combined_data[combined_data["sample_id"] == sample_id].copy()
+                if len(sample_data) > max_cells_per_sample:
+                    sample_data = sample_data.sample(n=max_cells_per_sample, random_state=42).reset_index(drop=True)
+                sampled_data.append(sample_data)
+            
+            combined_data_clean = pd.concat(sampled_data, ignore_index=True)
+            
+            # Remove non-numeric columns again (after sampling)
+            numeric_cols = combined_data_clean.select_dtypes(include=[np.number]).columns.tolist()
+            combined_data_clean = combined_data_clean[numeric_cols].copy()
+            
+            # Remove rows with NaN in x or y again
+            combined_data_clean = combined_data_clean[combined_data_clean["x"].notna() & combined_data_clean["y"].notna()]
+            
+            print(f"DEBUG: After adaptive per-sample sampling: {len(combined_data_clean)} total cells from {len(combined_data['sample_id'].unique())} samples")
+            print(f"DEBUG: Final data shape: {combined_data_clean.shape}, features: {len([c for c in combined_data_clean.columns if c not in ['x', 'y']])}")
+            
+            if len(combined_data_clean) < 100:
+                self.finished.emit(False, f"Not enough valid data points after sampling. Found: {len(combined_data_clean)} rows. Need at least 100.")
+                return
+            
+            # Additional global cap as safety measure (should rarely be needed with adaptive sampling)
+            max_rows_global = 3000  # Global cap as backup
+            if len(combined_data_clean) > max_rows_global:
+                print(f"DEBUG: Still too large ({len(combined_data_clean)} rows), applying global cap to {max_rows_global}")
+                combined_data_clean = combined_data_clean.sample(n=max_rows_global, random_state=42).reset_index(drop=True)
+            
+            # CRITICAL: Additional data validation to prevent crashes
+            # Replace Inf values with NaN, then drop those rows
+            import numpy as np
+            combined_data_clean = combined_data_clean.replace([np.inf, -np.inf], np.nan)
+            combined_data_clean = combined_data_clean.dropna()
+            
+            # Check for very large values that might cause numerical instability
+            # Clip extreme values to reasonable range (within 10 standard deviations)
+            for col in combined_data_clean.columns:
+                if col in ["x", "y"]:
+                    continue
+                col_data = combined_data_clean[col]
+                if col_data.dtype in [np.float64, np.float32]:
+                    mean_val = col_data.mean()
+                    std_val = col_data.std()
+                    if std_val > 0:
+                        # Clip to mean ± 10*std
+                        combined_data_clean[col] = col_data.clip(
+                            mean_val - 10 * std_val,
+                            mean_val + 10 * std_val
+                        )
+            
+            # Ensure all values are finite
+            for col in combined_data_clean.columns:
+                if combined_data_clean[col].dtype in [np.float64, np.float32]:
+                    combined_data_clean[col] = combined_data_clean[col].replace([np.inf, -np.inf], np.nan)
+            
+            # Final dropna after clipping
+            combined_data_clean = combined_data_clean.dropna()
+            
+            if len(combined_data_clean) < 100:
+                self.finished.emit(False, f"Not enough valid data points after cleaning. Found: {len(combined_data_clean)} rows. Need at least 100.")
+                return
+            
+            # Additional safety check: if still too large after adaptive sampling, reduce further
+            # This should rarely be needed now with adaptive per-sample sampling
+            if len(combined_data_clean) > 3000:
+                print(f"DEBUG: Further reducing sample size from {len(combined_data_clean)} to 3000 for stability")
+                combined_data_clean = combined_data_clean.sample(n=3000, random_state=42).reset_index(drop=True)
+            
+            print(f"DEBUG: Clean data shape: {combined_data_clean.shape}, columns: {len(combined_data_clean.columns)}")
+            print(f"DEBUG: Memory usage: {combined_data_clean.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
+            
+            # Force garbage collection before creating MM object
+            import gc
+            gc.collect()
             
             # Create MM object and set dataframe
-            mm = MM()
-            mm.df = combined_data_clean.copy()
+            try:
+                mm = MM()
+                print("DEBUG: MM object created")
+                
+                # Ensure dataframe is clean and has correct types
+                # Make a fresh copy to ensure memory alignment
+                mm.df = combined_data_clean.copy()
+                
+                # Ensure all columns are float64 for numerical stability
+                for col in mm.df.columns:
+                    if mm.df[col].dtype in [np.float32, np.int32, np.int64]:
+                        mm.df[col] = mm.df[col].astype(np.float64)
+                
+                print(f"DEBUG: MM.df shape: {mm.df.shape}, columns: {mm.df.columns.tolist()[:10]}")
+                
+                # Verify x and y columns exist and are numeric
+                if 'x' not in mm.df.columns or 'y' not in mm.df.columns:
+                    self.finished.emit(False, f"Missing x or y columns in MM.df. Available: {mm.df.columns.tolist()}")
+                    return
+                
+                # Final validation: check for any remaining invalid values
+                x_valid = mm.df['x'].notna() & np.isfinite(mm.df['x'])
+                y_valid = mm.df['y'].notna() & np.isfinite(mm.df['y'])
+                valid_mask = x_valid & y_valid
+                
+                if valid_mask.sum() < len(mm.df) * 0.9:  # If more than 10% invalid
+                    print(f"WARNING: {len(mm.df) - valid_mask.sum()} rows have invalid x/y values, removing them")
+                    mm.df = mm.df[valid_mask].copy()
+                
+                if len(mm.df) < 100:
+                    self.finished.emit(False, f"Not enough valid data after final validation. Found: {len(mm.df)} rows.")
+                    return
+                
+                print(f"DEBUG: x column dtype: {mm.df['x'].dtype}, y column dtype: {mm.df['y'].dtype}")
+                print(f"DEBUG: x range: [{mm.df['x'].min():.2f}, {mm.df['x'].max():.2f}]")
+                print(f"DEBUG: y range: [{mm.df['y'].min():.2f}, {mm.df['y'].max():.2f}]")
+                print(f"DEBUG: x has NaN: {mm.df['x'].isna().sum()}, Inf: {np.isinf(mm.df['x']).sum()}")
+                print(f"DEBUG: y has NaN: {mm.df['y'].isna().sum()}, Inf: {np.isinf(mm.df['y']).sum()}")
+                import sys
+                sys.stdout.flush()
+                
+            except Exception as e:
+                import traceback
+                error_trace = traceback.format_exc()
+                print(f"Error creating MM object: {e}\n{error_trace}")
+                self.finished.emit(False, f"Error creating MM object: {str(e)[:200]}")
+                return
+            
+            # Force garbage collection before feature importance calculation
+            gc.collect()
+            
+            # Set multiprocessing start method to 'spawn' to avoid semaphore leaks
+            import multiprocessing
+            try:
+                if multiprocessing.get_start_method(allow_none=True) != 'spawn':
+                    multiprocessing.set_start_method('spawn', force=True)
+            except RuntimeError:
+                # Already set, ignore
+                pass
             
             # Calculate feature importance for X dimension
+            features_x = pd.DataFrame()
             try:
-                print("DEBUG: Calculating X importance...")
-                features_x = mm.feature_importance(dep='x', indep='y')
+                print("=" * 80)
+                print("DEBUG: Starting X importance calculation...")
+                print(f"DEBUG: MM.df shape before feature_importance: {mm.df.shape}")
+                print(f"DEBUG: MM.df columns: {mm.df.columns.tolist()[:20]}")
+                print(f"DEBUG: MM.df memory usage: {mm.df.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
+                
+                # Additional validation: check for matrix singularity issues
+                # Check if x and y have sufficient variance
+                x_var = mm.df['x'].var()
+                y_var = mm.df['y'].var()
+                print(f"DEBUG: X variance: {x_var:.6f}, Y variance: {y_var:.6f}")
+                
+                if x_var < 1e-10 or y_var < 1e-10:
+                    print("WARNING: Very low variance in x or y, this may cause numerical issues")
+                
+                # Check correlation between x and y (should not be too high)
+                xy_corr = abs(mm.df['x'].corr(mm.df['y']))
+                print(f"DEBUG: X-Y correlation: {xy_corr:.6f}")
+                if xy_corr > 0.99:
+                    print("WARNING: Very high correlation between x and y, this may cause numerical issues")
+                
+                print(f"DEBUG: Calling mm.feature_importance(dep='x', indep='y')...")
+                import sys
+                sys.stdout.flush()  # Force output to console
+                
+                # Clear any cached computations in MM object
+                if hasattr(mm, 'df'):
+                    # Ensure df is a fresh copy
+                    mm.df = mm.df.copy()
+                
+                # Calculate feature importance manually to avoid multiprocessing issues
+                # MM.feature_importance uses RandomForestRegressor which uses multiprocessing by default
+                # We calculate it ourselves with n_jobs=1 to disable multiprocessing
+                from sklearn.ensemble import RandomForestRegressor
+                from sklearn.model_selection import train_test_split
+                from sklearn.preprocessing import MinMaxScaler
+                
+                # Calculate feature importance manually to avoid multiprocessing issues
+                data = mm.df.copy()
+                data = data.drop('y', axis=1)  # Drop indep
+                
+                # Split data
+                train_df, test_df = train_test_split(data, test_size=0.2, random_state=42)
+                X_train = train_df.drop('x', axis=1)  # Drop dep
+                y_train = train_df['x']
+                X_test = test_df.drop('x', axis=1)
+                y_test = test_df['x']
+                
+                # Run RandomForestRegressor with n_jobs=1 to disable multiprocessing
+                model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=1)
+                model.fit(X_train, y_train)
+                
+                # Get feature importance
+                importance = model.feature_importances_
+                
+                # Sort and get top 10
+                s_id = np.argsort(importance)
+                top_n = 10
+                s_id = s_id[-top_n:]
+                
+                # MinMax scaling
+                scaler = MinMaxScaler()
+                importance_scaled = scaler.fit_transform(importance.reshape(-1, 1)).flatten()
+                total_importance = np.sum(importance_scaled)
+                percentage_importance = (importance_scaled / total_importance) * 100
+                
+                # Create DataFrame matching MM.feature_importance output format
+                feature_names = X_train.columns[s_id]
+                features_x = pd.DataFrame({
+                    "index1": feature_names,
+                    "importance_normalized": importance_scaled[s_id],
+                    "percentage_importance": percentage_importance[s_id]
+                })
+                
                 print(f"DEBUG: X importance calculated successfully: {len(features_x)} features")
+                if not features_x.empty:
+                    print(f"DEBUG: X importance columns: {features_x.columns.tolist()}")
+                    print(f"DEBUG: X importance head:\n{features_x.head()}")
+                
+                # Force garbage collection after X calculation
+                gc.collect()
+                sys.stdout.flush()
             except Exception as e:
                 import traceback
                 error_trace = traceback.format_exc()
-                print(f"Error calculating X importance: {e}\n{error_trace}")
+                print("=" * 80)
+                print(f"ERROR calculating X importance: {e}")
+                print(f"ERROR traceback:\n{error_trace}")
+                print("=" * 80)
+                import sys
+                sys.stdout.flush()
                 features_x = pd.DataFrame()
+                gc.collect()  # Clean up on error
+            
+            # Force garbage collection before Y calculation
+            gc.collect()
             
             # Calculate feature importance for Y dimension
+            features_y = pd.DataFrame()
             try:
-                print("DEBUG: Calculating Y importance...")
-                features_y = mm.feature_importance(dep='y', indep='x')
+                print("=" * 80)
+                print("DEBUG: Starting Y importance calculation...")
+                print(f"DEBUG: MM.df shape before feature_importance: {mm.df.shape}")
+                
+                # Additional validation: check for matrix singularity issues
+                x_var = mm.df['x'].var()
+                y_var = mm.df['y'].var()
+                print(f"DEBUG: X variance: {x_var:.6f}, Y variance: {y_var:.6f}")
+                
+                print(f"DEBUG: Calculating Y importance manually (no multiprocessing)...")
+                import sys
+                sys.stdout.flush()  # Force output to console
+                
+                # Calculate feature importance for Y dimension manually (no multiprocessing)
+                data = mm.df.copy()
+                data = data.drop('x', axis=1)  # Drop indep
+                
+                # Split data
+                train_df, test_df = train_test_split(data, test_size=0.2, random_state=42)
+                X_train = train_df.drop('y', axis=1)  # Drop dep
+                y_train = train_df['y']
+                X_test = test_df.drop('y', axis=1)
+                y_test = test_df['y']
+                
+                # Run RandomForestRegressor with n_jobs=1 to disable multiprocessing
+                model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=1)
+                model.fit(X_train, y_train)
+                
+                # Get feature importance
+                importance = model.feature_importances_
+                
+                # Sort and get top 10
+                s_id = np.argsort(importance)
+                top_n = 10
+                s_id = s_id[-top_n:]
+                
+                # MinMax scaling
+                scaler = MinMaxScaler()
+                importance_scaled = scaler.fit_transform(importance.reshape(-1, 1)).flatten()
+                total_importance = np.sum(importance_scaled)
+                percentage_importance = (importance_scaled / total_importance) * 100
+                
+                # Create DataFrame matching MM.feature_importance output format
+                feature_names = X_train.columns[s_id]
+                features_y = pd.DataFrame({
+                    "index1": feature_names,
+                    "importance_normalized": importance_scaled[s_id],
+                    "percentage_importance": percentage_importance[s_id]
+                })
+                
                 print(f"DEBUG: Y importance calculated successfully: {len(features_y)} features")
+                if not features_y.empty:
+                    print(f"DEBUG: Y importance columns: {features_y.columns.tolist()}")
+                    print(f"DEBUG: Y importance head:\n{features_y.head()}")
+                
+                # Force garbage collection after Y calculation
+                gc.collect()
+                sys.stdout.flush()
             except Exception as e:
                 import traceback
                 error_trace = traceback.format_exc()
-                print(f"Error calculating Y importance: {e}\n{error_trace}")
+                print("=" * 80)
+                print(f"ERROR calculating Y importance: {e}")
+                print(f"ERROR traceback:\n{error_trace}")
+                print("=" * 80)
+                import sys
+                sys.stdout.flush()
                 features_y = pd.DataFrame()
+                gc.collect()  # Clean up on error
             
             if features_x.empty and features_y.empty:
                 self.finished.emit(False, "Could not calculate feature importance. Check console for detailed error messages.")
@@ -582,11 +923,13 @@ class FeatureImportanceWorker(QThread):
                 plot_path_x = self.paths["results"] / "top10_features_x.png"
                 plot_path_y = self.paths["results"] / "top10_features_y.png"
                 
+                # Create plots manually instead of using mm.plot_feature_importance
+                # to avoid any multiprocessing issues
                 if not features_x.empty:
-                    mm.plot_feature_importance(features_x, str(plot_path_x), base_width=10, base_height=6)
+                    self._plot_feature_importance_static(features_x, str(plot_path_x), "X Dimension")
                 
                 if not features_y.empty:
-                    mm.plot_feature_importance(features_y, str(plot_path_y), base_width=10, base_height=6)
+                    self._plot_feature_importance_static(features_y, str(plot_path_y), "Y Dimension")
                 
                 self.finished.emit(True, f"✅ Top10 Features saved to:\n{csv_path}\n\nPlots saved to:\n{plot_path_x}\n{plot_path_y}")
             else:
@@ -764,13 +1107,9 @@ class MorphoMappingGUI(QMainWindow):
         dr_section = self.create_dimensionality_reduction_section()
         content_layout.addWidget(dr_section)
         
-        # 6. Visualization
-        self.viz_section = self.create_visualization_section()
-        content_layout.addWidget(self.viz_section)
-        
-        # 7. Clustering
-        self.clustering_section = self.create_clustering_section()
-        content_layout.addWidget(self.clustering_section)
+        # 6. Visualization & Clustering (combined, side by side)
+        self.viz_cluster_section = self.create_visualization_clustering_section()
+        content_layout.addWidget(self.viz_cluster_section)
         
         content_layout.addStretch()
         
@@ -833,6 +1172,12 @@ class MorphoMappingGUI(QMainWindow):
         layout.addStretch()
         layout.addWidget(title_container, 1)  # Allow stretching for centering
         layout.addStretch()
+        
+        # Help button on the right
+        help_btn = QPushButton("📖 Help")
+        help_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 8px 15px; font-size: 12px;")
+        help_btn.clicked.connect(self.show_documentation)
+        layout.addWidget(help_btn, 0, Qt.AlignRight | Qt.AlignVCenter)
         
         return header
     
@@ -999,6 +1344,31 @@ class MorphoMappingGUI(QMainWindow):
                 label.setStyleSheet("color: green;")
                 self.status_layout.addWidget(label)
                 status_data["analysis"] = {"method": method, "status": "completed"}
+                
+                # Show file processing info
+                analysis_info = self.session_state.get("analysis_info", {})
+                usable_files = analysis_info.get("usable_files", 0)
+                skipped_files = analysis_info.get("skipped_files", [])
+                
+                if skipped_files:
+                    skipped_info = []
+                    for file_name, reasons in skipped_files:
+                        reason_str = "; ".join(reasons)
+                        skipped_info.append(f"{file_name}: {reason_str}")
+                    skipped_text = "\n".join(skipped_info[:5])  # Show first 5
+                    if len(skipped_info) > 5:
+                        skipped_text += f"\n... and {len(skipped_info) - 5} more"
+                    files_label = QLabel(f"📁 Files: ✅ {usable_files} usable, ⚠️ {len(skipped_files)} with notes")
+                    files_label.setStyleSheet("color: orange; font-size: 10px;")
+                    files_label.setWordWrap(True)
+                    files_label.setToolTip(skipped_text)
+                    self.status_layout.addWidget(files_label)
+                    status_data["file_info"] = {"usable": usable_files, "skipped": len(skipped_files), "skipped_details": skipped_files}
+                else:
+                    files_label = QLabel(f"📁 Files: ✅ {usable_files} usable")
+                    files_label.setStyleSheet("color: green; font-size: 10px;")
+                    self.status_layout.addWidget(files_label)
+                    status_data["file_info"] = {"usable": usable_files, "skipped": 0}
             else:
                 label = QLabel("📈 Analysis: ❌ Not run")
                 label.setStyleSheet("color: red;")
@@ -1727,7 +2097,7 @@ class MorphoMappingGUI(QMainWindow):
             all_features = sorted([c for c in df_sample.columns if c != "sample_id" and c not in all_populations_set])
             
             # Exclude patterns
-            exclude_patterns = ["intensity", "Intensity", "saturation", "Saturation", "Raw pixel", "Bkgd", "All", "Mean Pixel", "Max Pixel", "Median Pixel", "Raw", "Time", "Object Number"]
+            exclude_patterns = ["intensity", "Intensity", "saturation", "Saturation", "Raw pixel", "Bkgd", "All", "Mean Pixel", "Max Pixel", "Median Pixel", "Raw", "Time", "Object Number", "Flow Speed"]
             excluded_by_default = [f for f in all_features if any(p in f for p in exclude_patterns)]
             
             # Apply channel filtering (only if channels were explicitly excluded)
@@ -2245,7 +2615,11 @@ class MorphoMappingGUI(QMainWindow):
             self.update_status()
             
             # Force update of sections visibility
-            if hasattr(self, 'clustering_section'):
+            if hasattr(self, 'viz_cluster_section'):
+                if self.session_state.get("embedding_df") is not None:
+                    self.viz_cluster_section.setVisible(True)
+                    print(f"DEBUG: Combined visualization/clustering section set to visible after analysis")
+            elif hasattr(self, 'clustering_section'):
                 if self.session_state.get("embedding_df") is not None:
                     self.clustering_section.setVisible(True)
                     print(f"DEBUG: Clustering section set to visible after analysis")
@@ -2256,7 +2630,8 @@ class MorphoMappingGUI(QMainWindow):
                     print(f"DEBUG: Top10 Features button set to visible after analysis")
             
             self.update_visualization()
-            self.update_clustering_section()
+            if hasattr(self, 'update_clustering_section'):
+                self.update_clustering_section()
         else:
             QMessageBox.critical(self, "Error", message)
         
@@ -2265,17 +2640,255 @@ class MorphoMappingGUI(QMainWindow):
             self.active_workers.remove(worker)
     
     def on_top10_finished(self, success: bool, message: str, worker: FeatureImportanceWorker):
-        """Handle Top10 Features calculation completion."""
+        """Handle Feature Importance calculation completion."""
         self.top10_features_btn.setEnabled(True)
-        self.top10_features_btn.setText("📊 Download Top10 Features")
+        self.top10_features_btn.setText("📊 Feature Importance")
+        
+        # Print to console for debugging
+        print(f"DEBUG on_top10_finished: success={success}, message={message}")
         
         if success:
             QMessageBox.information(self, "Success", message)
         else:
-            QMessageBox.critical(self, "Error", message)
+            # Show detailed error message
+            error_msg = f"{message}\n\nPlease check the console for detailed debug output."
+            QMessageBox.critical(self, "Error", error_msg)
+            print(f"ERROR: Feature Importance calculation failed: {message}")
         
         if worker in self.active_workers:
             self.active_workers.remove(worker)
+    
+    def _plot_feature_importance(self, features_df: pd.DataFrame, output_path: str, title: str):
+        """Plot feature importance manually (replacement for mm.plot_feature_importance to avoid multiprocessing)."""
+        import matplotlib.pyplot as plt
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        
+        # Sort by importance
+        features_df = features_df.sort_values('importance_normalized', ascending=True)
+        
+        # Create horizontal bar chart
+        y_pos = np.arange(len(features_df))
+        ax.barh(y_pos, features_df['importance_normalized'], color='steelblue')
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(features_df['index1'])
+        ax.set_xlabel('Normalized Importance', fontsize=12, fontweight='bold')
+        ax.set_title(f'Top 10 Features - {title}', fontsize=14, fontweight='bold')
+        ax.invert_yaxis()  # Highest importance at top
+        
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+    
+    def create_visualization_clustering_section(self) -> QGroupBox:
+        """Create combined visualization and clustering section with side-by-side plots."""
+        group = QGroupBox("6️⃣ Visualization & Clustering")
+        group.setFont(QFont("Arial", 12, QFont.Bold))
+        group.setVisible(False)  # Hidden until analysis is done
+        
+        main_layout = QVBoxLayout()
+        
+        # Top controls row (shared)
+        top_controls = QHBoxLayout()
+        
+        # Left: Visualization controls
+        viz_controls = QVBoxLayout()
+        viz_controls.addWidget(QLabel("📊 Visualization (Left):"))
+        
+        color_layout = QHBoxLayout()
+        color_layout.addWidget(QLabel("Color by:"))
+        self.color_by_combo = QComboBox()
+        color_layout.addWidget(self.color_by_combo, 1)
+        viz_controls.addLayout(color_layout)
+        
+        # Axis limits (shared for both plots)
+        axis_layout = QHBoxLayout()
+        axis_layout.addWidget(QLabel("X:"))
+        self.x_min_input = QLineEdit()
+        self.x_min_input.setPlaceholderText("min")
+        self.x_min_input.setMaximumWidth(80)
+        axis_layout.addWidget(self.x_min_input)
+        axis_layout.addWidget(QLabel("to"))
+        self.x_max_input = QLineEdit()
+        self.x_max_input.setPlaceholderText("max")
+        self.x_max_input.setMaximumWidth(80)
+        axis_layout.addWidget(self.x_max_input)
+        axis_layout.addWidget(QLabel("Y:"))
+        self.y_min_input = QLineEdit()
+        self.y_min_input.setPlaceholderText("min")
+        self.y_min_input.setMaximumWidth(80)
+        axis_layout.addWidget(self.y_min_input)
+        axis_layout.addWidget(QLabel("to"))
+        self.y_max_input = QLineEdit()
+        self.y_max_input.setPlaceholderText("max")
+        self.y_max_input.setMaximumWidth(80)
+        axis_layout.addWidget(self.y_max_input)
+        apply_axis_btn = QPushButton("Apply Limits")
+        apply_axis_btn.setStyleSheet("background-color: #607D8B; color: white; padding: 3px;")
+        apply_axis_btn.clicked.connect(self.apply_axis_limits)
+        axis_layout.addWidget(apply_axis_btn)
+        reset_axis_btn = QPushButton("Reset")
+        reset_axis_btn.setStyleSheet("background-color: #9E9E9E; color: white; padding: 3px;")
+        reset_axis_btn.clicked.connect(self.reset_axis_limits)
+        axis_layout.addWidget(reset_axis_btn)
+        viz_controls.addLayout(axis_layout)
+        
+        # Highlight cells
+        highlight_layout = QHBoxLayout()
+        highlight_layout.addWidget(QLabel("Highlight:"))
+        self.highlight_input = QLineEdit()
+        self.highlight_input.setPlaceholderText("e.g., 100, 200")
+        highlight_layout.addWidget(self.highlight_input, 1)
+        highlight_btn = QPushButton("✨ Highlight")
+        highlight_btn.setStyleSheet("background-color: #9C27B0; color: white; padding: 3px;")
+        highlight_btn.clicked.connect(self.highlight_cells)
+        highlight_layout.addWidget(highlight_btn)
+        viz_controls.addLayout(highlight_layout)
+        
+        # Export buttons for visualization
+        viz_export_layout = QHBoxLayout()
+        export_viz_png = QPushButton("💾 Export PNG")
+        export_viz_png.setStyleSheet("background-color: #FF9800; color: white; padding: 3px;")
+        export_viz_png.clicked.connect(lambda: self.export_plot("png"))
+        viz_export_layout.addWidget(export_viz_png)
+        export_viz_pdf = QPushButton("💾 Export PDF")
+        export_viz_pdf.setStyleSheet("background-color: #F44336; color: white; padding: 3px;")
+        export_viz_pdf.clicked.connect(lambda: self.export_plot("pdf"))
+        viz_export_layout.addWidget(export_viz_pdf)
+        viz_controls.addLayout(viz_export_layout)
+        
+        # Feature Importance button
+        self.top10_features_btn = QPushButton("📊 Feature Importance")
+        self.top10_features_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 3px;")
+        self.top10_features_btn.clicked.connect(self.download_top10_features)
+        if self.session_state.get("embedding_df") is None:
+            self.top10_features_btn.setVisible(False)
+        viz_controls.addWidget(self.top10_features_btn)
+        
+        # Right: Clustering controls
+        cluster_controls = QVBoxLayout()
+        cluster_controls.addWidget(QLabel("🔬 Clustering (Right):"))
+        
+        # Algorithm selection
+        algo_layout = QHBoxLayout()
+        algo_layout.addWidget(QLabel("Algorithm:"))
+        self.cluster_algo_combo = QComboBox()
+        self.cluster_algo_combo.addItems(["KMeans", "Gaussian Mixture Models", "HDBSCAN"])
+        algo_layout.addWidget(self.cluster_algo_combo, 1)
+        cluster_controls.addLayout(algo_layout)
+        
+        # Parameters container
+        self.cluster_params_container = QWidget()
+        self.cluster_params_layout = QVBoxLayout(self.cluster_params_container)
+        self.cluster_n_input = QLineEdit()
+        self.cluster_n_input.setText("10")
+        self.cluster_n_input.setPlaceholderText("Number of clusters")
+        self.cluster_params_layout.addWidget(QLabel("Number of clusters:"))
+        self.cluster_params_layout.addWidget(self.cluster_n_input)
+        self.elbow_plot_btn = QPushButton("📊 Download Elbow Plot")
+        self.elbow_plot_btn.setStyleSheet("background-color: #FFC107; color: white; padding: 3px;")
+        self.elbow_plot_btn.clicked.connect(self.download_elbow_plot)
+        self.cluster_params_layout.addWidget(self.elbow_plot_btn)
+        self.cluster_algo_combo.currentTextChanged.connect(self.update_cluster_params)
+        cluster_controls.addWidget(self.cluster_params_container)
+        
+        # Run clustering button
+        cluster_btn = QPushButton("🔬 Run Clustering")
+        cluster_btn.setStyleSheet("background-color: #9C27B0; color: white; padding: 5px;")
+        cluster_btn.clicked.connect(self.run_clustering)
+        cluster_controls.addWidget(cluster_btn)
+        
+        # Export buttons for cluster plot
+        cluster_export_layout = QHBoxLayout()
+        export_cluster_png = QPushButton("💾 Export PNG")
+        export_cluster_png.setStyleSheet("background-color: #FF9800; color: white; padding: 3px;")
+        export_cluster_png.clicked.connect(lambda: self.export_cluster_plot("png"))
+        cluster_export_layout.addWidget(export_cluster_png)
+        export_cluster_pdf = QPushButton("💾 Export PDF")
+        export_cluster_pdf.setStyleSheet("background-color: #F44336; color: white; padding: 3px;")
+        export_cluster_pdf.clicked.connect(lambda: self.export_cluster_plot("pdf"))
+        cluster_export_layout.addWidget(export_cluster_pdf)
+        cluster_controls.addLayout(cluster_export_layout)
+        
+        # Analysis buttons
+        analysis_btn_layout = QHBoxLayout()
+        top5_features_btn = QPushButton("🔍 Top 5 Features")
+        top5_features_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 3px;")
+        top5_features_btn.clicked.connect(self.export_top3_features)
+        analysis_btn_layout.addWidget(top5_features_btn)
+        heatmap_btn = QPushButton("🔥 Heatmap")
+        heatmap_btn.setStyleSheet("background-color: #E91E63; color: white; padding: 3px;")
+        heatmap_btn.clicked.connect(self.export_cluster_heatmap)
+        analysis_btn_layout.addWidget(heatmap_btn)
+        cluster_controls.addLayout(analysis_btn_layout)
+        
+        # Add both control groups to top row
+        top_controls.addLayout(viz_controls, 1)
+        top_controls.addLayout(cluster_controls, 1)
+        main_layout.addLayout(top_controls)
+        
+        # Plots side by side
+        plots_layout = QHBoxLayout()
+        
+        # Left: Visualization plot
+        viz_group = QGroupBox("Dimensionality Reduction Plot")
+        viz_layout = QVBoxLayout()
+        self.plot_label = QLabel()
+        self.plot_label.setAlignment(Qt.AlignCenter)
+        self.plot_label.setMinimumHeight(400)
+        self.plot_label.setStyleSheet("border: 1px solid #ccc; background-color: white;")
+        viz_layout.addWidget(self.plot_label)
+        
+        # Cluster statistics for visualization plot (table only, no export button here)
+        viz_stats_header = QHBoxLayout()
+        viz_stats_header.addWidget(QLabel("📊 Statistics (Table):"))
+        viz_stats_header.addStretch()
+        viz_layout.addLayout(viz_stats_header)
+        
+        self.viz_stats_table = QTableWidget()
+        self.viz_stats_table.setColumnCount(4)
+        self.viz_stats_table.setHorizontalHeaderLabels(["Cluster", "Size", "Percentage", "Sample Distribution"])
+        self.viz_stats_table.horizontalHeader().setStretchLastSection(True)
+        self.viz_stats_table.setMaximumHeight(150)
+        viz_layout.addWidget(self.viz_stats_table)
+        
+        viz_group.setLayout(viz_layout)
+        plots_layout.addWidget(viz_group, 1)
+        
+        # Right: Cluster plot
+        cluster_group = QGroupBox("Clustering Plot")
+        cluster_layout = QVBoxLayout()
+        self.cluster_plot_label = QLabel()
+        self.cluster_plot_label.setAlignment(Qt.AlignCenter)
+        self.cluster_plot_label.setMinimumHeight(400)
+        self.cluster_plot_label.setStyleSheet("border: 1px solid #ccc; background-color: white;")
+        cluster_layout.addWidget(self.cluster_plot_label)
+        
+        # Cluster statistics for cluster plot - Bar Chart directly displayed
+        cluster_stats_header = QHBoxLayout()
+        cluster_stats_header.addWidget(QLabel("📊 Statistics (Bar Chart):"))
+        export_cluster_stats_btn = QPushButton("💾 Export")
+        export_cluster_stats_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 3px;")
+        export_cluster_stats_btn.clicked.connect(self.export_cluster_stats_chart)
+        cluster_stats_header.addWidget(export_cluster_stats_btn)
+        cluster_stats_header.addStretch()
+        cluster_layout.addLayout(cluster_stats_header)
+        
+        # Bar chart display (instead of table)
+        self.cluster_stats_chart_label = QLabel()
+        self.cluster_stats_chart_label.setAlignment(Qt.AlignCenter)
+        self.cluster_stats_chart_label.setMinimumHeight(200)
+        self.cluster_stats_chart_label.setStyleSheet("border: 1px solid #ccc; background-color: white;")
+        self.cluster_stats_chart_label.setText("Run clustering to see statistics chart")
+        cluster_layout.addWidget(self.cluster_stats_chart_label)
+        
+        cluster_group.setLayout(cluster_layout)
+        plots_layout.addWidget(cluster_group, 1)
+        
+        main_layout.addLayout(plots_layout)
+        
+        group.setLayout(main_layout)
+        return group
     
     def create_visualization_section(self) -> QGroupBox:
         """Create visualization section."""
@@ -2302,8 +2915,8 @@ class MorphoMappingGUI(QMainWindow):
         export_pdf_btn.clicked.connect(lambda: self.export_plot("pdf"))
         top_layout.addWidget(export_pdf_btn)
         
-        # Top10 Features download button
-        self.top10_features_btn = QPushButton("📊 Download Top10 Features")
+        # Feature Importance button
+        self.top10_features_btn = QPushButton("📊 Feature Importance")
         self.top10_features_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 5px;")
         self.top10_features_btn.clicked.connect(self.download_top10_features)
         # Show immediately if embedding already exists
@@ -2376,10 +2989,16 @@ class MorphoMappingGUI(QMainWindow):
     def update_visualization(self):
         """Update visualization plot."""
         if self.session_state.get("embedding_df") is None:
-            self.viz_section.setVisible(False)
+            if hasattr(self, 'viz_cluster_section'):
+                self.viz_cluster_section.setVisible(False)
+            elif hasattr(self, 'viz_section'):
+                self.viz_section.setVisible(False)
             return
         
-        self.viz_section.setVisible(True)
+        if hasattr(self, 'viz_cluster_section'):
+            self.viz_cluster_section.setVisible(True)
+        elif hasattr(self, 'viz_section'):
+            self.viz_section.setVisible(True)
         
         embedding_df = self.session_state["embedding_df"]
         method = self.session_state.get("stored_dim_reduction_method", "DensMAP")
@@ -2809,10 +3428,10 @@ class MorphoMappingGUI(QMainWindow):
         # Cluster-Feature Analysis buttons
         analysis_btn_layout = QHBoxLayout()
         
-        top3_features_btn = QPushButton("🔍 Top 3 Features per Cluster")
-        top3_features_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 5px;")
-        top3_features_btn.clicked.connect(self.export_top3_features)
-        analysis_btn_layout.addWidget(top3_features_btn)
+        top5_features_btn = QPushButton("🔍 Top 5 Features per Cluster")
+        top5_features_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 5px;")
+        top5_features_btn.clicked.connect(self.export_top3_features)  # Function name stays the same
+        analysis_btn_layout.addWidget(top5_features_btn)
         
         heatmap_btn = QPushButton("🔥 Cluster-Feature Heatmap")
         heatmap_btn.setStyleSheet("background-color: #E91E63; color: white; padding: 5px;")
@@ -2841,7 +3460,9 @@ class MorphoMappingGUI(QMainWindow):
     def update_clustering_section(self):
         """Update clustering section visibility."""
         if self.session_state.get("embedding_df") is not None:
-            if hasattr(self, 'clustering_section'):
+            if hasattr(self, 'viz_cluster_section'):
+                self.viz_cluster_section.setVisible(True)
+            elif hasattr(self, 'clustering_section'):
                 self.clustering_section.setVisible(True)
                 print(f"DEBUG: Clustering section set to visible")
             else:
@@ -2889,14 +3510,22 @@ class MorphoMappingGUI(QMainWindow):
             
         elif method == "HDBSCAN":
             # Min cluster size slider
+            # Default: target ~10 clusters by using larger min_cluster_size
+            # Calculate default based on embedding size if available
+            default_min_size = 500  # Default fallback
+            if self.session_state.get("embedding_df") is not None:
+                n_cells = len(self.session_state["embedding_df"])
+                default_min_size = max(500, int(n_cells / 10))
+                default_min_size = min(default_min_size, 5000)  # Cap at 5000
+            
             self.cluster_params_layout.addWidget(QLabel("Min cluster size:"))
             min_size_slider = QSlider(Qt.Horizontal)
             min_size_slider.setMinimum(10)
-            min_size_slider.setMaximum(500)
-            min_size_slider.setValue(50)
+            min_size_slider.setMaximum(5000)
+            min_size_slider.setValue(default_min_size)
             min_size_slider.setTickPosition(QSlider.TicksBelow)
-            min_size_slider.setTickInterval(50)
-            min_size_label = QLabel("50")
+            min_size_slider.setTickInterval(500)
+            min_size_label = QLabel(str(default_min_size))
             min_size_slider.valueChanged.connect(lambda v: min_size_label.setText(str(v)))
             self.cluster_params_layout.addWidget(min_size_slider)
             self.cluster_params_layout.addWidget(min_size_label)
@@ -2949,7 +3578,15 @@ class MorphoMappingGUI(QMainWindow):
             if hasattr(self, 'hdbscan_min_size'):
                 method_params["min_cluster_size"] = self.hdbscan_min_size.value()
             else:
-                method_params["min_cluster_size"] = 50
+                # Default: target ~10 clusters
+                embedding_df = self.session_state.get("embedding_df")
+                if embedding_df is not None:
+                    n_cells = len(embedding_df)
+                    default_min_size = max(500, int(n_cells / 10))
+                    default_min_size = min(default_min_size, 5000)
+                else:
+                    default_min_size = 500
+                method_params["min_cluster_size"] = default_min_size
             if hasattr(self, 'hdbscan_min_samples'):
                 method_params["min_samples"] = self.hdbscan_min_samples.value()
             else:
@@ -3000,25 +3637,32 @@ class MorphoMappingGUI(QMainWindow):
         cluster_counts = embedding_df["cluster"].value_counts().sort_index()
         total_cells = len(embedding_df)
         
-        # Update statistics table
-        self.cluster_stats_table.setRowCount(len(cluster_counts))
-        for idx, (cluster, count) in enumerate(cluster_counts.items()):
-            percentage = (count / total_cells) * 100
-            
-            # Sample distribution
-            cluster_df = embedding_df[embedding_df["cluster"] == cluster]
-            if "sample_id" in cluster_df.columns:
-                sample_dist = cluster_df["sample_id"].value_counts().to_dict()
-                sample_str = ", ".join([f"{k}: {v}" for k, v in list(sample_dist.items())[:3]])
-                if len(sample_dist) > 3:
-                    sample_str += f" (+{len(sample_dist) - 3} more)"
-            else:
-                sample_str = "N/A"
-            
-            self.cluster_stats_table.setItem(idx, 0, QTableWidgetItem(str(cluster)))
-            self.cluster_stats_table.setItem(idx, 1, QTableWidgetItem(str(count)))
-            self.cluster_stats_table.setItem(idx, 2, QTableWidgetItem(f"{percentage:.2f}%"))
-            self.cluster_stats_table.setItem(idx, 3, QTableWidgetItem(sample_str))
+        # Update statistics table(s) - update both if they exist
+        stats_tables = []
+        if hasattr(self, 'cluster_stats_table'):
+            stats_tables.append(self.cluster_stats_table)
+        if hasattr(self, 'viz_stats_table'):
+            stats_tables.append(self.viz_stats_table)
+        
+        for stats_table in stats_tables:
+            stats_table.setRowCount(len(cluster_counts))
+            for idx, (cluster, count) in enumerate(cluster_counts.items()):
+                percentage = (count / total_cells) * 100
+                
+                # Sample distribution
+                cluster_df = embedding_df[embedding_df["cluster"] == cluster]
+                if "sample_id" in cluster_df.columns:
+                    sample_dist = cluster_df["sample_id"].value_counts().to_dict()
+                    sample_str = ", ".join([f"{k}: {v}" for k, v in list(sample_dist.items())[:3]])
+                    if len(sample_dist) > 3:
+                        sample_str += f" (+{len(sample_dist) - 3} more)"
+                else:
+                    sample_str = "N/A"
+                
+                stats_table.setItem(idx, 0, QTableWidgetItem(str(cluster)))
+                stats_table.setItem(idx, 1, QTableWidgetItem(str(count)))
+                stats_table.setItem(idx, 2, QTableWidgetItem(f"{percentage:.2f}%"))
+                stats_table.setItem(idx, 3, QTableWidgetItem(sample_str))
         
         method = self.session_state.get("stored_dim_reduction_method", "DensMAP")
         x_label, y_label = get_axis_labels(method)
@@ -3061,6 +3705,97 @@ class MorphoMappingGUI(QMainWindow):
         pixmap = QPixmap()
         pixmap.loadFromData(buf.read())
         self.cluster_plot_label.setPixmap(pixmap.scaled(self.cluster_plot_label.width(), self.cluster_plot_label.height(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        plt.close(fig)
+        
+        # Update bar chart display if available
+        if hasattr(self, 'cluster_stats_chart_label'):
+            self.update_cluster_stats_chart_display()
+    
+    def update_cluster_stats_chart_display(self):
+        """Update the cluster statistics bar chart display directly in the GUI."""
+        if self.session_state.get("cluster_labels") is None or self.session_state.get("embedding_df") is None:
+            if hasattr(self, 'cluster_stats_chart_label'):
+                self.cluster_stats_chart_label.setText("Run clustering to see statistics chart")
+            return
+        
+        embedding_df = self.session_state["embedding_df"].copy()
+        embedding_df["cluster"] = self.session_state["cluster_labels"]
+        embedding_df["cluster"] = embedding_df["cluster"].astype(str)
+        embedding_df.loc[embedding_df["cluster"] == "-1", "cluster"] = "Noise"
+        
+        # Check if group column exists
+        if "group" not in embedding_df.columns:
+            if hasattr(self, 'cluster_stats_chart_label'):
+                self.cluster_stats_chart_label.setText("Add 'group' column to metadata to see statistics chart")
+            return
+        
+        # Filter out NaN and empty string groups
+        embedding_df = embedding_df[embedding_df["group"].notna()]
+        embedding_df = embedding_df[embedding_df["group"].astype(str).str.strip() != ""]
+        
+        if len(embedding_df) == 0:
+            if hasattr(self, 'cluster_stats_chart_label'):
+                self.cluster_stats_chart_label.setText("No valid groups found. Add group values to metadata.")
+            return
+        
+        # Calculate percentage per cluster and group
+        cluster_group_counts = embedding_df.groupby(["cluster", "group"]).size().reset_index(name="count")
+        cluster_totals = embedding_df.groupby("cluster").size().reset_index(name="total")
+        cluster_group_counts = cluster_group_counts.merge(cluster_totals, on="cluster")
+        cluster_group_counts["percentage"] = (cluster_group_counts["count"] / cluster_group_counts["total"]) * 100
+        
+        # Create bar chart
+        fig, ax = plt.subplots(figsize=(10, 4))
+        
+        clusters = sorted(cluster_group_counts["cluster"].unique())
+        groups = sorted(cluster_group_counts["group"].dropna().unique())
+        
+        if len(groups) == 0:
+            if hasattr(self, 'cluster_stats_chart_label'):
+                self.cluster_stats_chart_label.setText("No groups found in data.")
+            plt.close(fig)
+            return
+        
+        x = np.arange(len(clusters))
+        width = 0.8 / len(groups) if len(groups) > 1 else 0.8
+        
+        # Create bars for each group (stacked)
+        bottom = np.zeros(len(clusters))
+        colors = plt.cm.Set3(np.linspace(0, 1, len(groups)))
+        
+        for idx, group in enumerate(groups):
+            values = []
+            for cluster in clusters:
+                subset = cluster_group_counts[(cluster_group_counts["cluster"] == cluster) & 
+                                             (cluster_group_counts["group"] == group)]
+                values.append(subset["percentage"].iloc[0] if len(subset) > 0 else 0)
+            
+            ax.bar(x, values, width, label=str(group), bottom=bottom, color=colors[idx])
+            bottom += np.array(values)
+        
+        ax.set_xlabel("Cluster", fontsize=10, fontweight="bold")
+        ax.set_ylabel("Percentage (%)", fontsize=10, fontweight="bold")
+        ax.set_title("Cluster Distribution by Group", fontsize=12, fontweight="bold")
+        ax.set_xticks(x)
+        ax.set_xticklabels(clusters, fontsize=8)
+        if len(groups) > 0 and len(bottom) > 0:
+            ax.legend(title="Group", fontsize=8, loc="upper right")
+        ax.set_ylim(0, max(100, float(bottom.max()) * 1.1) if len(bottom) > 0 and bottom.max() > 0 else 100)
+        plt.tight_layout()
+        
+        # Convert to QPixmap and display
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+        buf.seek(0)
+        pixmap = QPixmap()
+        pixmap.loadFromData(buf.read())
+        if hasattr(self, 'cluster_stats_chart_label'):
+            self.cluster_stats_chart_label.setPixmap(pixmap.scaled(
+                self.cluster_stats_chart_label.width(), 
+                self.cluster_stats_chart_label.height(), 
+                Qt.KeepAspectRatio, 
+                Qt.SmoothTransformation
+            ))
         plt.close(fig)
     
     def download_elbow_plot(self):
@@ -3368,8 +4103,9 @@ class MorphoMappingGUI(QMainWindow):
             if isinstance(cluster_series, pd.DataFrame):
                 cluster_series = cluster_series.iloc[:, 0]
             clusters = sorted(cluster_series.unique())
-            cluster_feature_means = []
             
+            # First, calculate mean feature values for ALL clusters
+            all_cluster_means = {}
             for cluster in clusters:
                 cluster_df = embedding_df[embedding_df["cluster"] == cluster]
                 sample_counts = cluster_df["sample_id"].value_counts()
@@ -3394,18 +4130,65 @@ class MorphoMappingGUI(QMainWindow):
                     if total_weight > 0:
                         cluster_feature_values[feature] = weighted_sum / total_weight
                 
-                # Get top 3 features
-                if cluster_feature_values:
-                    sorted_features = sorted(cluster_feature_values.items(), key=lambda x: x[1], reverse=True)
-                    top3 = sorted_features[:3]
+                all_cluster_means[cluster] = cluster_feature_values
+            
+            # Now calculate distinguishing features per cluster
+            # A feature distinguishes a cluster if it has high variance across clusters
+            # (i.e., the cluster's value is very different from other clusters)
+            cluster_feature_means = []
+            
+            for cluster in clusters:
+                cluster_feature_values = all_cluster_means.get(cluster, {})
+                if not cluster_feature_values:
+                    continue
+                
+                # Calculate distinguishing score for each feature
+                # Score = how different this cluster's value is from the mean across all clusters
+                distinguishing_scores = {}
+                for feature in cluster_feature_values.keys():
+                    # Get this cluster's value
+                    cluster_value = cluster_feature_values[feature]
+                    
+                    # Get all other clusters' values for this feature
+                    other_values = []
+                    for other_cluster in clusters:
+                        if other_cluster != cluster and feature in all_cluster_means.get(other_cluster, {}):
+                            other_values.append(all_cluster_means[other_cluster][feature])
+                    
+                    if len(other_values) > 0:
+                        # Calculate how different this cluster is from others
+                        # Use coefficient of variation or absolute difference from mean
+                        mean_other = np.mean(other_values)
+                        std_other = np.std(other_values) if len(other_values) > 1 else 0
+                        
+                        if std_other > 0:
+                            # Z-score: how many standard deviations away from mean
+                            z_score = abs((cluster_value - mean_other) / std_other)
+                        else:
+                            # If no variance, use absolute difference
+                            z_score = abs(cluster_value - mean_other) if mean_other != 0 else abs(cluster_value)
+                        
+                        distinguishing_scores[feature] = z_score
+                    else:
+                        # Only one cluster, can't distinguish
+                        distinguishing_scores[feature] = 0
+                
+                # Get top 5 most distinguishing features
+                if distinguishing_scores:
+                    sorted_features = sorted(distinguishing_scores.items(), key=lambda x: x[1], reverse=True)
+                    top5 = sorted_features[:5]
                     cluster_feature_means.append({
                         "Cluster": cluster,
-                        "Top1_Feature": top3[0][0] if len(top3) > 0 else "",
-                        "Top1_Value": f"{top3[0][1]:.4f}" if len(top3) > 0 else "",
-                        "Top2_Feature": top3[1][0] if len(top3) > 1 else "",
-                        "Top2_Value": f"{top3[1][1]:.4f}" if len(top3) > 1 else "",
-                        "Top3_Feature": top3[2][0] if len(top3) > 2 else "",
-                        "Top3_Value": f"{top3[2][1]:.4f}" if len(top3) > 2 else "",
+                        "Top1_Feature": top5[0][0] if len(top5) > 0 else "",
+                        "Top1_Score": f"{top5[0][1]:.4f}" if len(top5) > 0 else "",
+                        "Top2_Feature": top5[1][0] if len(top5) > 1 else "",
+                        "Top2_Score": f"{top5[1][1]:.4f}" if len(top5) > 1 else "",
+                        "Top3_Feature": top5[2][0] if len(top5) > 2 else "",
+                        "Top3_Score": f"{top5[2][1]:.4f}" if len(top5) > 2 else "",
+                        "Top4_Feature": top5[3][0] if len(top5) > 3 else "",
+                        "Top4_Score": f"{top5[3][1]:.4f}" if len(top5) > 3 else "",
+                        "Top5_Feature": top5[4][0] if len(top5) > 4 else "",
+                        "Top5_Score": f"{top5[4][1]:.4f}" if len(top5) > 4 else "",
                     })
             
             if not cluster_feature_means:
@@ -3413,15 +4196,15 @@ class MorphoMappingGUI(QMainWindow):
                 return
             
             # Save to CSV
-            top3_df = pd.DataFrame(cluster_feature_means)
+            top5_df = pd.DataFrame(cluster_feature_means)
             paths["results"].mkdir(parents=True, exist_ok=True)
-            output_path = paths["results"] / "top3_features_per_cluster.csv"
-            top3_df.to_csv(output_path, index=False)
+            output_path = paths["results"] / "top5_features_per_cluster.csv"
+            top5_df.to_csv(output_path, index=False)
             
             QMessageBox.information(
                 self, 
                 "Success", 
-                f"✅ Top 3 Features per Cluster saved to:\n{output_path}\n\n"
+                f"✅ Top 5 Features per Cluster saved to:\n{output_path}\n\n"
                 f"Found {len(cluster_feature_means)} clusters with feature data."
             )
             
@@ -3432,7 +4215,14 @@ class MorphoMappingGUI(QMainWindow):
             QMessageBox.critical(self, "Error", f"❌ Error: {str(e)[:200]}")
     
     def export_cluster_heatmap(self):
-        """Export cluster-feature heatmap with row-wise Z-score normalization."""
+        """Export cluster-feature heatmap with row-wise Z-score normalization.
+        
+        Creates a clean DataFrame structure:
+        1. Create DataFrame with features as rows, clusters as columns
+        2. Calculate row-wise Z-score
+        3. Create new DataFrame with Z-scores
+        4. Plot heatmap
+        """
         if self.session_state.get("cluster_labels") is None or self.session_state.get("embedding_df") is None:
             QMessageBox.warning(self, "Warning", "No cluster data available. Run clustering first.")
             return
@@ -3475,20 +4265,15 @@ class MorphoMappingGUI(QMainWindow):
                 # Filter by population if selected
                 population = self.session_state.get("selected_population")
                 if population and population in df.columns:
-                    # Get population column as Series
                     pop_series = df[population]
                     if isinstance(pop_series, pd.DataFrame):
                         pop_series = pop_series.iloc[:, 0]
-                    
-                    # Check dtype safely
-                    pop_dtype = pop_series.dtype
-                    if pop_dtype == bool:
-                        # Use .values to avoid Series ambiguity
-                        mask = pop_series.values == True
+                    pop_array = np.asarray(pop_series)
+                    if pop_series.dtype == bool or str(pop_series.dtype) == 'bool':
+                        mask = pop_array == True
                         df = df[mask]
                     else:
-                        # For numeric types, check if value equals 1
-                        mask = pop_series.values == 1
+                        mask = pop_array == 1
                         df = df[mask]
                 
                 # Select only available features
@@ -3508,233 +4293,294 @@ class MorphoMappingGUI(QMainWindow):
             feature_data = pd.concat(all_feature_data, ignore_index=True)
             feature_data["sample_id"] = feature_data["sample_id"].astype(str)
             
-            print(f"DEBUG: Combined feature_data shape: {feature_data.shape}")
-            print(f"DEBUG: feature_data columns (first 10): {feature_data.columns.tolist()[:10]}")
-            
-            # Merge embedding_df with feature_data using sample_id
-            # First, ensure both have matching sample_id format
+            # Merge embedding_df with feature_data
             embedding_df["sample_id"] = embedding_df["sample_id"].astype(str)
             
-            # Create cell_index in both DataFrames for proper alignment
-            # embedding_df should already have cell_index from analysis
+            # Create cell_index for alignment
             if "cell_index" not in embedding_df.columns:
-                # Create cell_index as 0-based index within each sample
                 embedding_df = embedding_df.reset_index(drop=True)
                 embedding_df["cell_index"] = embedding_df.groupby("sample_id").cumcount()
             
-            # Create cell_index in feature_data if not present
             if "cell_index" not in feature_data.columns:
                 feature_data = feature_data.reset_index(drop=True)
                 feature_data["cell_index"] = feature_data.groupby("sample_id").cumcount()
             
-            print(f"DEBUG: embedding_df sample_ids: {embedding_df['sample_id'].unique()[:5]}")
-            print(f"DEBUG: feature_data sample_ids: {feature_data['sample_id'].unique()[:5]}")
-            print(f"DEBUG: embedding_df cell_index range: {embedding_df['cell_index'].min()} to {embedding_df['cell_index'].max()}")
-            print(f"DEBUG: feature_data cell_index range: {feature_data['cell_index'].min()} to {feature_data['cell_index'].max()}")
-            
-            # Merge embedding with feature data on sample_id and cell_index
+            # Merge on sample_id and cell_index
             merged_df = embedding_df.merge(
                 feature_data,
                 on=["sample_id", "cell_index"],
-                how="inner",  # Use inner join to only keep matched rows
+                how="inner",
                 suffixes=("_emb", "_feat")
             )
             
-            print(f"DEBUG: Merged data shape: {merged_df.shape}")
-            print(f"DEBUG: Features available in merged: {sum([f in merged_df.columns for f in features])} out of {len(features)}")
-            
-            # Calculate mean feature values per cluster
-            # Ensure cluster is a Series
+            # Get clusters
             cluster_series = merged_df["cluster"]
             if isinstance(cluster_series, pd.DataFrame):
                 cluster_series = cluster_series.iloc[:, 0]
             clusters = sorted([c for c in cluster_series.unique() if pd.notna(c)])
             
-            print(f"DEBUG: Clusters found: {clusters}")
-            
             if not clusters:
                 QMessageBox.warning(self, "Warning", "No valid clusters found in data.")
                 return
             
-            heatmap_data = []
+            # STEP 1: Create DataFrame with mean feature values per cluster
+            # Structure: Features as rows (index), Clusters as columns
+            heatmap_data_dict = {}
             
-            for cluster in clusters:
-                cluster_mask = merged_df["cluster"] == cluster
-                cluster_df = merged_df[cluster_mask]
-                
-                if len(cluster_df) == 0:
+            for feature in features:
+                if feature not in merged_df.columns:
                     continue
                 
-                cluster_means = {"Cluster": cluster}
-                for feature in features:
-                    if feature not in cluster_df.columns:
-                        cluster_means[feature] = np.nan
+                feature_values_per_cluster = {}
+                for cluster in clusters:
+                    cluster_mask = merged_df["cluster"] == cluster
+                    cluster_df = merged_df[cluster_mask]
+                    
+                    if len(cluster_df) == 0:
+                        feature_values_per_cluster[cluster] = np.nan
                         continue
                     
-                    # Calculate mean directly from merged data
                     feature_values = cluster_df[feature].dropna()
                     if len(feature_values) > 0:
-                        mean_val = float(feature_values.mean())
-                        cluster_means[feature] = mean_val
+                        feature_values_per_cluster[cluster] = float(feature_values.mean())
                     else:
-                        cluster_means[feature] = np.nan
+                        feature_values_per_cluster[cluster] = np.nan
                 
-                heatmap_data.append(cluster_means)
+                heatmap_data_dict[feature] = feature_values_per_cluster
             
-            print(f"DEBUG: Heatmap data entries: {len(heatmap_data)}")
-            if heatmap_data:
-                print(f"DEBUG: First cluster features count: {len([k for k in heatmap_data[0].keys() if k != 'Cluster'])}")
-            
-            # Create DataFrame: rows = clusters, columns = features
-            heatmap_df = pd.DataFrame(heatmap_data)
-            
-            if heatmap_df.empty:
-                QMessageBox.warning(self, "Warning", "No heatmap data created.")
-                return
-            
-            print(f"DEBUG: heatmap_df shape before transpose: {heatmap_df.shape}")
-            print(f"DEBUG: heatmap_df columns (first 5): {heatmap_df.columns.tolist()[:5]}")
-            
-            heatmap_df = heatmap_df.set_index("Cluster")  # Cluster as index (rows)
-            # Now transpose: features as rows (index), clusters as columns
-            heatmap_df = heatmap_df.T
-            # After transpose: heatmap_df.index = Features, heatmap_df.columns = Clusters
-            
-            print(f"DEBUG: heatmap_df shape after transpose: {heatmap_df.shape}")
-            print(f"DEBUG: heatmap_df index (first 5 features): {heatmap_df.index.tolist()[:5]}")
-            print(f"DEBUG: heatmap_df columns (clusters): {heatmap_df.columns.tolist()}")
-            print(f"DEBUG: heatmap_df value range before z-score: min={heatmap_df.values.min():.2f}, max={heatmap_df.values.max():.2f}")
+            # Create DataFrame: Features as rows, Clusters as columns
+            heatmap_df = pd.DataFrame(heatmap_data_dict).T
+            # Now: heatmap_df.index = Features, heatmap_df.columns = Clusters
             
             # Remove features with all NaN
             heatmap_df = heatmap_df.dropna(how='all')
             
             if heatmap_df.empty:
-                QMessageBox.warning(self, "Warning", "No valid feature data for heatmap after removing NaN.")
+                QMessageBox.warning(self, "Warning", "No valid feature data for heatmap.")
                 return
             
-            print(f"DEBUG: heatmap_df shape after dropna: {heatmap_df.shape}")
+            # Ensure all values are numeric
+            heatmap_df = heatmap_df.apply(pd.to_numeric, errors='coerce')
             
-            # Row-wise Z-score normalization
+            # STEP 2: Calculate row-wise Z-score
             from scipy.stats import zscore
             
-            # Ensure all values are numeric before applying zscore
-            # Convert to numeric, coercing errors to NaN
-            heatmap_df_numeric = heatmap_df.apply(pd.to_numeric, errors='coerce')
+            # Apply z-score row-wise (for each feature across clusters)
+            # Create new DataFrame to store Z-scores
+            heatmap_z_data = {}
             
-            # Remove rows/columns with all NaN
-            heatmap_df_numeric = heatmap_df_numeric.dropna(how='all').dropna(axis=1, how='all')
+            for feature in heatmap_df.index:
+                row_values = heatmap_df.loc[feature].values
+                # Remove NaN values for zscore calculation
+                valid_mask = ~np.isnan(row_values)
+                if valid_mask.sum() > 1:  # Need at least 2 values for zscore
+                    valid_values = row_values[valid_mask]
+                    z_scores = zscore(valid_values, nan_policy='omit')
+                    # Create full array with NaN where original was NaN
+                    z_full = np.full(len(row_values), np.nan)
+                    z_full[valid_mask] = z_scores
+                    heatmap_z_data[feature] = z_full
+                else:
+                    # If not enough values, set all to 0
+                    heatmap_z_data[feature] = np.zeros(len(row_values))
             
-            if heatmap_df_numeric.empty:
-                QMessageBox.warning(self, "Warning", "No valid numeric feature data for heatmap.")
-                return
+            # Create DataFrame from dictionary
+            # heatmap_z_data: {feature: [z_score_for_cluster1, z_score_for_cluster2, ...]}
+            # We want: Features as rows (index), Clusters as columns
+            # Convert dict to DataFrame: keys (features) become index, arrays become rows
+            # But arrays need to be aligned with cluster columns
+            heatmap_z = pd.DataFrame(heatmap_z_data, index=heatmap_df.columns).T
+            # After transpose: heatmap_z.index = Features, heatmap_z.columns = Clusters
+            # Ensure correct order
+            heatmap_z = heatmap_z.reindex(index=heatmap_df.index, columns=heatmap_df.columns)
             
-            # Apply z-score
-            heatmap_z = heatmap_df_numeric.apply(zscore, axis=1, nan_policy='omit')
-            
-            # Ensure heatmap_z is a DataFrame (not Series)
-            # If only one row, apply() returns a Series - convert to DataFrame
-            if isinstance(heatmap_z, pd.Series):
-                heatmap_z = heatmap_z.to_frame().T
-            
+            # STEP 3: Create new DataFrame with Z-scores
             # Replace NaN with 0 (for features with no variance)
             heatmap_z = heatmap_z.fillna(0)
             
-            # Ensure numeric dtype - handle any remaining non-numeric values
-            # Convert each column individually to handle mixed types
-            for col in heatmap_z.columns:
-                heatmap_z[col] = pd.to_numeric(heatmap_z[col], errors='coerce')
-            
-            # Fill NaN again after conversion
-            heatmap_z = heatmap_z.fillna(0)
-            
-            # Final conversion to float - ensure all values are scalars
-            # Check for any remaining non-scalar values and convert them
+            # Ensure all values are float and scalar
             for col in heatmap_z.columns:
                 for idx in heatmap_z.index:
                     val = heatmap_z.loc[idx, col]
-                    if not isinstance(val, (int, float, np.number)) or (isinstance(val, float) and np.isnan(val)):
-                        heatmap_z.loc[idx, col] = 0.0
-                    elif isinstance(val, (list, tuple, np.ndarray)):
+                    if isinstance(val, (list, tuple, np.ndarray)):
                         # If somehow a sequence got in, take first element or mean
-                        try:
                             if len(val) > 0:
                                 heatmap_z.loc[idx, col] = float(np.mean(val))
                             else:
                                 heatmap_z.loc[idx, col] = 0.0
-                        except:
+                    elif not isinstance(val, (int, float, np.number)) or (isinstance(val, float) and np.isnan(val)):
                             heatmap_z.loc[idx, col] = 0.0
             
-            # Now safe to convert to float
+            # Ensure all values are float
             heatmap_z = heatmap_z.astype(float)
             
-            # Create heatmap
-            # heatmap_z structure: rows (index) = Features, columns = Clusters
+            # Final structure: heatmap_z.index = Features, heatmap_z.columns = Clusters
             n_features = len(heatmap_z.index)
             n_clusters = len(heatmap_z.columns)
-            
-            print(f"DEBUG: Final heatmap_z shape: {heatmap_z.shape}")
-            print(f"DEBUG: n_features: {n_features}, n_clusters: {n_clusters}")
-            print(f"DEBUG: heatmap_z value range: min={heatmap_z.values.min():.2f}, max={heatmap_z.values.max():.2f}")
-            print(f"DEBUG: heatmap_z index (first 5): {heatmap_z.index.tolist()[:5]}")
-            print(f"DEBUG: heatmap_z columns: {heatmap_z.columns.tolist()}")
             
             if n_features == 0 or n_clusters == 0:
                 QMessageBox.warning(self, "Warning", f"Invalid heatmap dimensions: {n_features} features, {n_clusters} clusters")
                 return
             
-            # Calculate figure size - make it larger for better visibility
-            # More space for features on Y-axis and clusters on X-axis
-            fig_width = max(12, n_clusters * 1.2)
-            fig_height = max(10, n_features * 0.5)
+            # STEP 4: Create heatmap using R (pheatmap) for reliable results
+            # Save data to CSV for R script
+            paths["results"].mkdir(parents=True, exist_ok=True)
+            temp_csv = paths["results"] / "heatmap_data_temp.csv"
+            heatmap_z.to_csv(temp_csv)
             
-            # Use seaborn.clustermap for dendrograms, or seaborn.heatmap as fallback
+            output_path = paths["results"] / "cluster_feature_heatmap.png"
+            
+            # Check if R script exists
+            if not R_HEATMAP_SCRIPT.exists():
+                QMessageBox.warning(
+                    self,
+                    "Warning",
+                    f"R heatmap script not found: {R_HEATMAP_SCRIPT}\n\nFalling back to Python."
+                )
+                self._create_heatmap_python_fallback(heatmap_z, n_features, n_clusters, paths)
+                return
+            
+            # Call R script to create heatmap
+            command = [
+                "Rscript", "--vanilla", "--slave",
+                str(R_HEATMAP_SCRIPT),
+                str(temp_csv),
+                str(output_path),
+                str(n_features),
+                str(n_clusters)
+            ]
+            
+            print(f"DEBUG: Calling R script: {' '.join(command)}")
+            result = subprocess.run(command, capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                QMessageBox.information(
+                    self,
+                    "Success",
+                    f"✅ Cluster-Feature Heatmap saved to:\n{output_path}\n\n"
+                    f"Created using R (pheatmap) with dendrograms."
+                )
+                # Clean up temp file
+                try:
+                    temp_csv.unlink()
+                except:
+                    pass
+            else:
+                error_msg = result.stderr.strip() if result.stderr.strip() else result.stdout.strip()
+                if not error_msg:
+                    error_msg = f"R script failed with return code {result.returncode}"
+                print(f"DEBUG: R script error: {error_msg}")
+                QMessageBox.warning(
+                    self,
+                    "Warning",
+                    f"R heatmap script failed. Falling back to Python.\n\n{error_msg[:200]}"
+                )
+                # Fallback to Python (original code)
+                self._create_heatmap_python_fallback(heatmap_z, n_features, n_clusters, paths)
+        
+        except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
+            print(f"Error exporting cluster heatmap: {e}\n{error_trace}")
+            QMessageBox.critical(self, "Error", f"❌ Error: {str(e)[:200]}")
+    
+    def _create_heatmap_python_fallback(self, heatmap_z, n_features, n_clusters, paths):
+        """Fallback Python heatmap creation if R script fails."""
+        try:
+            # Increase figure size to accommodate dendrograms
+            fig_width = max(14, n_clusters * 1.5)
+            fig_height = max(12, n_features * 0.3)
+            
+            # Calculate font size for Y-axis
+            if n_features <= 20:
+                y_fontsize = 28
+            elif n_features <= 50:
+                y_fontsize = 24
+            elif n_features <= 100:
+                y_fontsize = 20
+            else:
+                y_fontsize = 16
+            
             try:
                 import seaborn as sns
                 
                 # Try clustermap first (with dendrograms)
+                # Check if scipy is available for clustering
                 try:
-                    # clustermap: rows (y-axis) = index, columns (x-axis) = columns
-                    # heatmap_z: index = Features (rows), columns = Clusters (columns)
-                    # row_cluster=True: cluster features (Y-axis)
-                    # col_cluster=True: cluster clusters (X-axis)
-                    g = sns.clustermap(
-                        heatmap_z,
-                        cmap="RdYlBu_r",
-                        center=0,
-                        vmin=-3,
-                        vmax=3,
-                        row_cluster=True,  # Cluster features (Y-axis)
-                        col_cluster=True,  # Cluster clusters (X-axis)
-                        method='ward',  # Linkage method
-                        metric='euclidean',
-                        figsize=(fig_width, fig_height),
-                        cbar_kws={"label": "Z-score (row-wise)"},
-                        xticklabels=True,
-                        yticklabels=True if n_features <= 100 else False,
-                        linewidths=0.1,
-                        linecolor='gray',
-                        cbar_pos=(0.02, 0.8, 0.03, 0.15)  # Position colorbar
-                    )
+                    from scipy.cluster.hierarchy import linkage
+                    from scipy.spatial.distance import pdist
+                    _ = linkage(heatmap_z.iloc[:2, :2].values, method='ward')  # Quick test
+                    use_clustermap = True
+                except Exception as scipy_test_error:
+                    print(f"DEBUG: scipy clustering test failed ({scipy_test_error}), will use simple heatmap")
+                    use_clustermap = False
+                
+                if use_clustermap:
+                    try:
+                        # Create clustermap with dendrograms
+                        g = sns.clustermap(
+                            heatmap_z,
+                            cmap="RdYlBu_r",
+                            center=0,
+                            vmin=-3,
+                            vmax=3,
+                            row_cluster=True,  # Cluster features (Y-axis) - creates dendrogram
+                            col_cluster=True,  # Cluster clusters (X-axis) - creates dendrogram
+                            method='ward',
+                            metric='euclidean',
+                            figsize=(fig_width, fig_height),
+                            cbar_kws={"label": "Z-score", "shrink": 0.6},
+                            xticklabels=True,
+                            yticklabels=True if n_features <= 100 else False,
+                            linewidths=0.1,
+                            linecolor='gray',
+                            cbar_pos=(0.92, 0.05, 0.02, 0.08)  # Bottom right, smaller height
+                        )
+                    except Exception as clustermap_error:
+                        print(f"DEBUG: clustermap creation failed ({clustermap_error})")
+                        use_clustermap = False
+                
+                if use_clustermap:
                     
-                    # Set axis labels
-                    g.ax_row_dendrogram.set_visible(True)
-                    g.ax_col_dendrogram.set_visible(True)
-                    g.ax_heatmap.set_xlabel("Cluster", fontsize=12, fontweight="bold")
-                    g.ax_heatmap.set_ylabel("Feature", fontsize=12, fontweight="bold")
+                    # Remove general Y-axis label, only show individual feature names
+                    g.ax_heatmap.set_xlabel("Cluster", fontsize=24, fontweight="bold")
+                    g.ax_heatmap.set_ylabel("")  # Remove "Feature" label
+                    # X-axis labels: no rotation, horizontal
+                    g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=0, ha='center', fontsize=18, fontweight='bold')
                     
-                    # Rotate cluster labels on X-axis
-                    g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=45, ha='right', fontsize=9)
-                    
-                    # Show feature labels on Y-axis (if not too many)
                     if n_features <= 100:
-                        g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0, fontsize=7)
-                    else:
-                        # Show every Nth feature
-                        step = max(1, n_features // 100)
-                        yticks = g.ax_heatmap.get_yticks()
-                        yticklabels = [heatmap_z.index[int(i)] if i < len(heatmap_z.index) else '' for i in yticks[::step]]
-                        g.ax_heatmap.set_yticks(yticks[::step])
-                        g.ax_heatmap.set_yticklabels(yticklabels, rotation=0, fontsize=6)
+                        # Set y-axis labels with much larger, bold font
+                        yticklabels = g.ax_heatmap.get_yticklabels()
+                        for label in yticklabels:
+                            label.set_fontsize(y_fontsize)
+                            label.set_fontweight('bold')
+                        g.ax_heatmap.set_yticklabels(yticklabels, rotation=0)
+                    
+                    # Colorbar (legend) - bottom right, smaller
+                    if g.cax is not None:
+                        # Position colorbar bottom right, smaller
+                        g.cax.set_position([0.92, 0.05, 0.02, 0.08])  # x, y, width, height (bottom right, smaller)
+                        g.cax.set_label("Z-score", fontsize=10, fontweight='bold')
+                        # Make colorbar label smaller
+                        g.cax.yaxis.label.set_fontsize(10)
+                        g.cax.yaxis.label.set_fontweight('bold')
+                        # Make tick labels smaller
+                        g.cax.tick_params(labelsize=8)
+                    
+                    # Ensure dendrograms are visible and properly sized
+                    # Row dendrogram (left side)
+                    if hasattr(g, 'ax_row_dendrogram') and g.ax_row_dendrogram is not None:
+                        g.ax_row_dendrogram.set_visible(True)
+                        # Ensure it has proper width
+                        g.ax_row_dendrogram.set_position(g.ax_row_dendrogram.get_position())
+                    # Column dendrogram (top side)
+                    if hasattr(g, 'ax_col_dendrogram') and g.ax_col_dendrogram is not None:
+                        g.ax_col_dendrogram.set_visible(True)
+                        # Ensure it has proper height
+                        g.ax_col_dendrogram.set_position(g.ax_col_dendrogram.get_position())
+                    
+                    # Adjust layout to make room for dendrograms
+                    g.fig.subplots_adjust(right=0.85)  # Leave space for colorbar
                     
                     g.fig.suptitle(
                         f"Cluster-Feature Heatmap (Row-wise Z-score)\n{n_features} Features × {n_clusters} Clusters",
@@ -3743,73 +4589,79 @@ class MorphoMappingGUI(QMainWindow):
                         y=0.98
                     )
                     
-                    plt.tight_layout()
+                    # DO NOT use tight_layout - it overwrites our manual positions
+                    # Set positions explicitly before saving
+                    # Ensure dendrograms are visible
+                    if hasattr(g, 'ax_row_dendrogram') and g.ax_row_dendrogram is not None:
+                        g.ax_row_dendrogram.set_visible(True)
+                    if hasattr(g, 'ax_col_dendrogram') and g.ax_col_dendrogram is not None:
+                        g.ax_col_dendrogram.set_visible(True)
                     
-                    # Save
+                    # Adjust layout manually - leave space for dendrograms and colorbar
+                    g.fig.subplots_adjust(left=0.15, right=0.90, top=0.90, bottom=0.10)
+                    
                     paths["results"].mkdir(parents=True, exist_ok=True)
                     output_path = paths["results"] / "cluster_feature_heatmap.png"
-                    g.savefig(output_path, dpi=300, bbox_inches="tight")
+                    # Save without bbox_inches="tight" to preserve manual positions
+                    g.fig.savefig(output_path, dpi=300, bbox_inches=None, pad_inches=0.1)
                     plt.close(g.fig)
                     
-                except Exception as clustermap_error:
+                else:
+                    # Use simple heatmap (no dendrograms)
                     print(f"DEBUG: clustermap failed ({clustermap_error}), falling back to heatmap")
-                    # Fallback to regular heatmap without dendrograms
+                    import traceback
+                    print(f"DEBUG: clustermap error traceback:\n{traceback.format_exc()}")
+                    # Fallback to regular heatmap (no dendrograms, but same styling)
                     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
                     
-                    # seaborn.heatmap: rows (y-axis) = index, columns (x-axis) = columns
-                    # heatmap_z: index = Features (rows), columns = Clusters (columns)
-                    sns.heatmap(
-                        heatmap_z,
-                        cmap="RdYlBu_r",
-                        center=0,
-                        vmin=-3,
-                        vmax=3,
-                        cbar_kws={"label": "Z-score (row-wise)"},
-                        ax=ax,
-                        xticklabels=True,
-                        yticklabels=True if n_features <= 100 else False,
-                        linewidths=0.1,
-                        linecolor='gray',
-                        square=False
-                    )
+                    # Create heatmap with manual colorbar positioning
+                    im = ax.imshow(heatmap_z.values, aspect='auto', cmap='RdYlBu_r', vmin=-3, vmax=3, interpolation='nearest')
                     
-                    # X-axis: clusters (columns) - horizontal
-                    ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right', fontsize=9)
+                    # Set ticks and labels
+                    ax.set_xticks(range(len(heatmap_z.columns)))
+                    ax.set_xticklabels(heatmap_z.columns, rotation=0, ha='center', fontsize=18, fontweight='bold')
+                    ax.set_xlabel("Cluster", fontsize=24, fontweight="bold")
                     
-                    # Y-axis: features (index/rows) - vertical
                     if n_features <= 100:
-                        ax.set_yticklabels(heatmap_z.index, rotation=0, fontsize=7)
+                        ax.set_yticks(range(len(heatmap_z.index)))
+                        ax.set_yticklabels(heatmap_z.index, rotation=0, fontsize=y_fontsize, fontweight='bold')
                     else:
-                        # Show every Nth feature label
                         step = max(1, n_features // 100)
                         yticks = range(0, n_features, step)
                         ax.set_yticks(yticks)
-                        ax.set_yticklabels([heatmap_z.index[i] for i in yticks], rotation=0, fontsize=6)
+                        ax.set_yticklabels([heatmap_z.index[i] for i in yticks], rotation=0, fontsize=12)
+                    ax.set_ylabel("")  # Remove "Feature" label
                     
-                    # Ensure correct axis labels
-                    ax.set_xlabel("Cluster", fontsize=12, fontweight="bold")
-                    ax.set_ylabel("Feature", fontsize=12, fontweight="bold")
+                    # Add colorbar - small, bottom right
+                    from mpl_toolkits.axes_grid1 import make_axes_locatable
+                    divider = make_axes_locatable(ax)
+                    cbar_ax = divider.append_axes("right", size="2%", pad=0.05)
+                    cbar = plt.colorbar(im, cax=cbar_ax)
+                    cbar.set_label("Z-score", fontsize=10, fontweight='bold')
+                    cbar.ax.tick_params(labelsize=8)
+                    # Position colorbar bottom right
+                    cbar_ax.set_position([0.92, 0.05, 0.02, 0.08])
+                    
+                    ax.set_xlabel("Cluster", fontsize=24, fontweight="bold")
+                    ax.set_ylabel("")  # Remove "Feature" label, only show individual feature names
                     ax.set_title(
                         f"Cluster-Feature Heatmap (Row-wise Z-score)\n{n_features} Features × {n_clusters} Clusters",
                         fontsize=14,
                         fontweight="bold"
                     )
                     
-                    plt.tight_layout()
+                    # Adjust layout manually (no tight_layout)
+                    plt.subplots_adjust(left=0.15, right=0.90, top=0.90, bottom=0.10)
                     
-                    # Save
                     paths["results"].mkdir(parents=True, exist_ok=True)
                     output_path = paths["results"] / "cluster_feature_heatmap.png"
-                    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+                    plt.savefig(output_path, dpi=300, bbox_inches=None, pad_inches=0.1)
                     plt.close(fig)
                     
             except ImportError:
-                # Fallback to matplotlib (no seaborn available)
+                # Fallback to matplotlib
                 fig, ax = plt.subplots(figsize=(fig_width, fig_height))
                 
-                # imshow: first dimension (rows) = y-axis, second dimension (columns) = x-axis
-                # heatmap_z.values: rows = Features, columns = Clusters
-                # So: Y-axis = Features, X-axis = Clusters
                 im = ax.imshow(
                     heatmap_z.values,
                     cmap="RdYlBu_r",
@@ -3820,45 +4672,50 @@ class MorphoMappingGUI(QMainWindow):
                     interpolation='nearest'
                 )
                 
-                # X-axis: clusters (columns) - horizontal
                 ax.set_xticks(range(n_clusters))
+                # X-axis labels: no rotation, horizontal
                 ax.set_xticklabels(
                     [str(int(c)) if isinstance(c, (int, float)) else str(c) for c in heatmap_z.columns],
-                    rotation=45,
-                    ha='right',
-                    fontsize=9
+                    rotation=0,
+                    ha='center',
+                    fontsize=18,
+                    fontweight='bold'
                 )
                 
-                # Y-axis: features (index/rows) - vertical
                 if n_features <= 100:
                     ax.set_yticks(range(n_features))
-                    ax.set_yticklabels(heatmap_z.index, rotation=0, fontsize=7)
+                    # Set y-axis labels with much larger, bold font
+                    yticklabels = ax.get_yticklabels()
+                    for label in yticklabels:
+                        label.set_fontsize(y_fontsize)
+                        label.set_fontweight('bold')
+                    ax.set_yticklabels(heatmap_z.index, rotation=0)
                 else:
-                    # Show every Nth label
                     step = max(1, n_features // 100)
                     yticks = range(0, n_features, step)
                     ax.set_yticks(yticks)
                     ax.set_yticklabels([heatmap_z.index[i] for i in yticks], rotation=0, fontsize=6)
-                
-                plt.colorbar(im, ax=ax, label="Z-score (row-wise)")
-                
-                ax.set_xlabel("Cluster", fontsize=12, fontweight="bold")
-                ax.set_ylabel("Feature", fontsize=12, fontweight="bold")
+
+                # Colorbar (legend) - smaller, bottom right, larger label
+                cbar = plt.colorbar(im, ax=ax, label="Z-score (row-wise)")
+                cbar.ax.set_position([0.92, 0.05, 0.02, 0.15])  # x, y, width, height (bottom right)
+                cbar.set_label("Z-score (row-wise)", fontsize=14, fontweight='bold')
+                ax.set_xlabel("Cluster", fontsize=24, fontweight="bold")
+                ax.set_ylabel("")  # Remove "Feature" label, only show individual feature names
                 ax.set_title(
                     f"Cluster-Feature Heatmap (Row-wise Z-score)\n{n_features} Features × {n_clusters} Clusters",
                     fontsize=14,
                     fontweight="bold"
                 )
-                
-                plt.tight_layout()
-                
-                # Save
-                paths["results"].mkdir(parents=True, exist_ok=True)
-                output_path = paths["results"] / "cluster_feature_heatmap.png"
-                plt.savefig(output_path, dpi=300, bbox_inches="tight")
-                plt.close(fig)
             
-            # Also save the data
+            plt.tight_layout()
+            
+            paths["results"].mkdir(parents=True, exist_ok=True)
+            output_path = paths["results"] / "cluster_feature_heatmap.png"
+            plt.savefig(output_path, dpi=300, bbox_inches="tight")
+            plt.close(fig)
+            
+            # Save the Z-score data
             data_path = paths["results"] / "cluster_feature_heatmap_data.csv"
             heatmap_z.to_csv(data_path)
             
@@ -3874,6 +4731,70 @@ class MorphoMappingGUI(QMainWindow):
             error_trace = traceback.format_exc()
             print(f"Error exporting cluster heatmap: {e}\n{error_trace}")
             QMessageBox.critical(self, "Error", f"❌ Error: {str(e)[:200]}")
+    
+    def show_documentation(self):
+        """Show documentation in a dialog window."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("MorphoMapping - Documentation")
+        dialog.setMinimumSize(900, 700)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Create tab widget for different documentation sections
+        tabs = QTabWidget()
+        
+        # Read documentation files
+        doc_dir = BUNDLE_ROOT
+        
+        # Installation Guide
+        install_text = QTextEdit()
+        install_text.setReadOnly(True)
+        install_path = doc_dir / "INSTALLATION.md"
+        if install_path.exists():
+            install_text.setPlainText(install_path.read_text(encoding='utf-8'))
+        else:
+            install_text.setPlainText("Installation guide not found.")
+        tabs.addTab(install_text, "Installation")
+        
+        # User Guide
+        user_guide_text = QTextEdit()
+        user_guide_text.setReadOnly(True)
+        user_guide_path = doc_dir / "USER_GUIDE.md"
+        if user_guide_path.exists():
+            user_guide_text.setPlainText(user_guide_path.read_text(encoding='utf-8'))
+        else:
+            user_guide_text.setPlainText("User guide not found.")
+        tabs.addTab(user_guide_text, "User Guide")
+        
+        # README
+        readme_text = QTextEdit()
+        readme_text.setReadOnly(True)
+        readme_path = doc_dir / "README.md"
+        if readme_path.exists():
+            readme_text.setPlainText(readme_path.read_text(encoding='utf-8'))
+        else:
+            readme_text.setPlainText("README not found.")
+        tabs.addTab(readme_text, "Overview")
+        
+        # Documentation Index
+        index_text = QTextEdit()
+        index_text.setReadOnly(True)
+        index_path = doc_dir / "DOCUMENTATION_INDEX.md"
+        if index_path.exists():
+            index_text.setPlainText(index_path.read_text(encoding='utf-8'))
+        else:
+            index_text.setPlainText("Documentation index not found.")
+        tabs.addTab(index_text, "Index")
+        
+        layout.addWidget(tabs)
+        
+        # Close button
+        close_btn = QPushButton("Close")
+        close_btn.setStyleSheet("background-color: #1976D2; color: white; padding: 8px;")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+        
+        dialog.exec()
 
 
 def main():

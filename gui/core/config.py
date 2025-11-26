@@ -34,4 +34,6 @@ SAMPLING_METHOD = "random"  # "random" or "stratified"
 BUNDLE_ROOT = Path(__file__).resolve().parent.parent  # gui/
 PROJECT_ROOT = BUNDLE_ROOT.parent  # MorphoMapping/ (parent of gui/)
 R_SCRIPT = PROJECT_ROOT / "R" / "daf_to_fcs_cli.R"
+R_HEATMAP_SCRIPT = PROJECT_ROOT / "R" / "create_heatmap.R"
+R_HEATMAP_SCRIPT = PROJECT_ROOT / "R" / "create_heatmap.R"
 

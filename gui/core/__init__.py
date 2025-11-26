@@ -6,7 +6,7 @@ It can be used by both Streamlit and NiceGUI implementations.
 """
 
 from .config import (
-    BUNDLE_ROOT, PROJECT_ROOT, R_SCRIPT,
+    BUNDLE_ROOT, PROJECT_ROOT, R_SCRIPT, R_HEATMAP_SCRIPT,
     DEFAULT_FEATURES, DEFAULT_METADATA_ROWS, COLOR_PALETTE,
     MAX_POINTS_FOR_VISUALIZATION, SAMPLING_METHOD,
 )
@@ -27,7 +27,7 @@ from .visualization import (
 )
 
 __all__ = [
-    "BUNDLE_ROOT", "PROJECT_ROOT", "R_SCRIPT",
+    "BUNDLE_ROOT", "PROJECT_ROOT", "R_SCRIPT", "R_HEATMAP_SCRIPT",
     "DEFAULT_FEATURES", "DEFAULT_METADATA_ROWS", "COLOR_PALETTE",
     "MAX_POINTS_FOR_VISUALIZATION", "SAMPLING_METHOD",
     "get_run_paths", "get_file_counts",
