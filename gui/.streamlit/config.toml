@@ -1,0 +1,26 @@
+[server]
+# Increase max upload size to handle large DAF files
+maxUploadSize = 500
+# Increase max message size for large data transfers
+maxMessageSize = 500
+
+[client]
+# Show error details
+showErrorDetails = true
+
+[browser]
+# Don't automatically open browser
+gatherUsageStats = false
+
+[runner]
+# Fast reruns
+fastReruns = true
+
+[theme]
+primaryColor = "#1f77b4"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f0f2f6"
+textColor = "#262730"
+font = "sans serif"
+
+

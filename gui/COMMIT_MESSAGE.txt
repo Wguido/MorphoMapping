@@ -1,0 +1,34 @@
+Add PySide6 GUI (morphomapping_gui.py) with comprehensive documentation
+
+- New stable PySide6 desktop GUI for large .daf files (100-500 MB)
+- Comprehensive installation guide (INSTALLATION.md) - DAU-tauglich
+- Complete user guide (USER_GUIDE.md) with step-by-step workflows
+- GitHub-ready documentation structure
+- Channel filtering for features (Ch01-Ch12 with auto M01-M12 exclusion)
+- Cluster analysis and visualization
+- Feature selection with include/exclude chips
+- Known issues: Heatmap visualization and Top10 Features (see GITHUB_ISSUES.md)
+
+Features:
+- Native file dialogs (no upload needed)
+- Drag & drop support for DAF files
+- Background processing with QThread workers
+- Progress bars for long-running operations
+- Export functionality (PNG/PDF, 300 DPI)
+- Axis limits adjustment
+- Cell highlighting
+- Cluster statistics
+- Top 3 features per cluster
+- Cluster-feature heatmap (row-wise Z-score)
+
+Technical:
+- PySide6 for maximum stability
+- Cross-platform (macOS, Windows, Linux)
+- Standalone executable support (PyInstaller)
+- Comprehensive error handling
+- Debug output for troubleshooting
+
+Known Issues (see GITHUB_ISSUES.md):
+- Cluster-Feature Heatmap: Visualization shows wrong axes, no visible differences
+- Top 10 Features: Calculation crashes on large datasets
+
