@@ -1,10 +1,10 @@
 # MorphoMapping GUI - Installation Guide
 
-## 📋 Overview
+## Overview
 
 This guide walks you through installing the MorphoMapping GUI step by step. No programming experience needed - just follow the instructions.
 
-## ⚙️ System Requirements
+## ⚙ System Requirements
 
 ### Operating System
 - **macOS**: 10.15 (Catalina) or newer
@@ -22,26 +22,26 @@ This guide walks you through installing the MorphoMapping GUI step by step. No p
 
 ---
 
-## 🚀 Installation - Step by Step
+## Installation - Step by Step
 
 ### Step 1: Install Python
 
 #### macOS
 
 1. **Option A: Homebrew (Recommended)**
-   ```bash
-   # Install Homebrew (if not already installed)
-   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-   
-   # Install Python
-   brew install python@3.11
-   ```
+ ```bash
+ # Install Homebrew (if not already installed)
+ /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+ 
+ # Install Python
+ brew install python@3.11
+ ```
 
 2. **Option B: Python.org**
-   - Go to https://www.python.org/downloads/
-   - Download Python 3.11 for macOS
-   - Run the installer
-   - **IMPORTANT**: Check "Add Python to PATH" during installation
+ - Go to https://www.python.org/downloads/
+ - Download Python 3.11 for macOS
+ - Run the installer
+ - **IMPORTANT**: Check "Add Python to PATH" during installation
 
 #### Windows
 
@@ -227,11 +227,11 @@ A window should open with:
 - "Status" section
 - Various buttons and input fields
 
-If the window appears: ✅ **Installation successful!**
+If the window appears: **Installation successful!**
 
 ---
 
-## 🔧 Troubleshooting
+## Troubleshooting
 
 ### Problem: "python: command not found"
 
@@ -246,10 +246,10 @@ If the window appears: ✅ **Installation successful!**
 1. Close the terminal and open it again
 2. Or reinstall Conda (see Step 4)
 3. **macOS**: Add Conda to PATH:
-   ```bash
-   echo 'export PATH="$HOME/miniconda3/bin:$PATH"' >> ~/.zshrc
-   source ~/.zshrc
-   ```
+ ```bash
+ echo 'export PATH="$HOME/miniconda3/bin:$PATH"' >> ~/.zshrc
+ source ~/.zshrc
+ ```
 
 ### Problem: "Rscript: command not found"
 
@@ -279,25 +279,25 @@ pip install -e ./
 
 **Solution:**
 1. Check if all dependencies are installed:
-   ```bash
-   pip list | grep -E "PySide6|pandas|numpy|matplotlib|scikit-learn|hdbscan|umap-learn"
-   ```
+ ```bash
+ pip list | grep -E "PySide6|pandas|numpy|matplotlib|scikit-learn|hdbscan|umap-learn"
+ ```
 
 2. Check Python version:
-   ```bash
-   python --version
-   ```
-   Should be 3.10 or 3.11, NOT 3.12 or newer!
+ ```bash
+ python --version
+ ```
+ Should be 3.10 or 3.11, NOT 3.12 or newer!
 
 3. Try starting the GUI with debug output:
-   ```bash
-   python morphomapping_gui.py 2>&1 | tee gui_debug.log
-   ```
-   Send the `gui_debug.log` file to support.
+ ```bash
+ python morphomapping_gui.py 2>&1 | tee gui_debug.log
+ ```
+ Send the `gui_debug.log` file to support.
 
 ---
 
-## 📦 Alternative: Standalone Executable (For End Users)
+## Alternative: Standalone Executable (For End Users)
 
 If you don't want a Python installation, you can use a standalone version:
 
@@ -309,11 +309,11 @@ pip install pyinstaller
 
 cd gui
 pyinstaller --name="MorphoMapping" \
-            --windowed \
-            --onefile \
-            --add-data "core:core" \
-            --add-data "../assets:assets" \
-            morphomapping_gui.py
+ --windowed \
+ --onefile \
+ --add-data "core:core" \
+ --add-data "../assets:assets" \
+ morphomapping_gui.py
 ```
 
 The executable will be in `dist/MorphoMapping.app` (macOS) or `dist/MorphoMapping.exe` (Windows).
@@ -328,14 +328,14 @@ The executable will be in `dist/MorphoMapping.app` (macOS) or `dist/MorphoMappin
 
 ---
 
-## ✅ Installation Successful?
+## Installation Successful?
 
 After successful installation, you should be able to:
 
-1. ✅ Start the GUI: `python morphomapping_gui.py`
-2. ✅ See a window with logo and various sections
-3. ✅ Select DAF files
-4. ✅ Enter metadata
+1. Start the GUI: `python morphomapping_gui.py`
+2. See a window with logo and various sections
+3. Select DAF files
+4. Enter metadata
 
 **Next Steps:**
 - Read the [User Guide](USER_GUIDE.md) for usage instructions
@@ -343,20 +343,20 @@ After successful installation, you should be able to:
 
 ---
 
-## 🆘 Need Help?
+## Need Help?
 
 If you're having problems:
 
 1. **Check the system requirements** (see above)
 2. **Read the troubleshooting section** (see above)
 3. **Create a GitHub Issue**: https://github.com/Wguido/MorphoMapping/issues
-   - Describe your problem
-   - Include error messages
-   - Provide your system information (OS, Python version, etc.)
+ - Describe your problem
+ - Include error messages
+ - Provide your system information (OS, Python version, etc.)
 
 ---
 
-## 📝 Checklist
+## Checklist
 
 Use this checklist to make sure everything is installed:
 
@@ -368,7 +368,7 @@ Use this checklist to make sure everything is installed:
 - [ ] MorphoMapping package installed (`pip install -e ../../../`)
 - [ ] GUI starts successfully (`python morphomapping_gui.py`)
 
-If all items are checked: ✅ **You're ready!**
+If all items are checked: **You're ready!**
 
 ---
 

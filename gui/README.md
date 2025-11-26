@@ -2,7 +2,7 @@
 
 A stable desktop GUI for analyzing large ImageStream .daf files (100-500 MB).
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 # 1. Activate environment
@@ -19,60 +19,60 @@ cd gui
 python morphomapping_gui.py
 ```
 
-## 📚 Documentation
+## Documentation
 
 - **[INSTALLATION.md](INSTALLATION.md)** - Detailed installation guide (beginner-friendly)
 - **[USER_GUIDE.md](USER_GUIDE.md)** - User manual with step-by-step instructions
 - **[DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md)** - Documentation overview
 
-## ✨ Features
+## Features
 
 ### Core Functionality
 
 1. **Project Setup**
-   - Set project directory
-   - Manage Run-ID
-   - Status overview
+ - Set project directory
+ - Manage Run-ID
+ - Status overview
 
 2. **DAF File Processing**
-   - Native file selection (no upload needed!)
-   - Drag & drop support
-   - Automatic conversion to FCS
-   - Progress indicator
+ - Native file selection (no upload needed!)
+ - Drag & drop support
+ - Automatic conversion to FCS
+ - Progress indicator
 
 3. **Metadata Management**
-   - Manual entry (left) with auto-fill
-   - CSV/Excel upload (right)
-   - Scrollable table (shows ~3 rows)
-   - Auto-numbering for sample_id
+ - Manual entry (left) with auto-fill
+ - CSV/Excel upload (right)
+ - Scrollable table (shows ~3 rows)
+ - Auto-numbering for sample_id
 
 4. **Feature Selection**
-   - Clickable feature chips (blue = included, red = excluded)
-   - First 10 features visible, rest collapsible
-   - Population/gate selection
-   - Channel filtering (Ch01-Ch12 with auto M01-M12 exclusion)
+ - Clickable feature chips (blue = included, red = excluded)
+ - First 10 features visible, rest collapsible
+ - Population/gate selection
+ - Channel filtering (Ch01-Ch12 with auto M01-M12 exclusion)
 
 5. **Dimensionality Reduction**
-   - **DensMAP** (default)
-   - **UMAP**
-   - **t-SNE**
-   - Parameter sliders for all methods
-   - Max cells per sample (sampling)
+ - **DensMAP** (default)
+ - **UMAP**
+ - **t-SNE**
+ - Parameter sliders for all methods
+ - Max cells per sample (sampling)
 
 6. **Visualization**
-   - Interactive plots with color coding
-   - Color by metadata (sample_id, group, etc.)
-   - Adjustable axis limits
-   - Cell highlighting
-   - Export as PNG/PDF (300 DPI)
+ - Interactive plots with color coding
+ - Color by metadata (sample_id, group, etc.)
+ - Adjustable axis limits
+ - Cell highlighting
+ - Export as PNG/PDF (300 DPI)
 
 7. **Clustering**
-   - **KMeans** (10 clusters default)
-   - **Gaussian Mixture Models (GMM)**
-   - **HDBSCAN**
-   - Dynamic parameter sliders
-   - Elbow plot for KMeans
-   - Cluster statistics
+ - **KMeans** (10 clusters default)
+ - **Gaussian Mixture Models (GMM)**
+ - **HDBSCAN**
+ - Dynamic parameter sliders
+ - Elbow plot for KMeans
+ - Cluster statistics
 
 8. **Advanced Analysis**
    - **Top 3 Features per Cluster** (CSV export)
@@ -80,22 +80,14 @@ python morphomapping_gui.py
    - **Cluster Statistics Bar Chart** (by groups)
    - **Top 10 Features** for X/Y dimensions
 
-## 🎯 Why PySide6?
-
-- ✅ **Maximum stability**: No WebSocket drops, no browser issues
-- ✅ **Direct file access**: Files are read directly from filesystem (no upload!)
-- ✅ **Native desktop app**: Better performance with large data
-- ✅ **No connection errors**: Native threading, no network issues
-- ✅ **Standalone executable**: Can be built as .app (macOS) or .exe (Windows)
-
-## 📋 System Requirements
+## System Requirements
 
 - **Python**: 3.10 or 3.11 (not 3.12+)
 - **R**: 4.0+ (for DAF-to-FCS conversion)
 - **RAM**: 8 GB minimum (16 GB recommended)
 - **OS**: macOS 10.15+, Windows 10+, Linux (Ubuntu 20.04+)
 
-## 🛠️ Installation
+## Installation
 
 ### For Beginners
 
@@ -120,36 +112,36 @@ cd gui
 python morphomapping_gui.py
 ```
 
-## 📦 Dependencies
+## Dependencies
 
 ```
-PySide6>=6.5.0          # GUI Framework
-pandas>=1.5.0           # Data processing
-numpy>=1.23.0            # Numerical computations
-matplotlib>=3.6.0        # Visualization
-scikit-learn>=1.2.0      # Machine Learning
-hdbscan>=0.8.0           # Clustering
-umap-learn>=0.5.0        # Dimensionality reduction
-openpyxl>=3.0.0          # Excel files
-scipy>=1.9.0             # Scientific computations
+PySide6>=6.5.0 # GUI Framework
+pandas>=1.5.0 # Data processing
+numpy>=1.23.0 # Numerical computations
+matplotlib>=3.6.0 # Visualization
+scikit-learn>=1.2.0 # Machine Learning
+hdbscan>=0.8.0 # Clustering
+umap-learn>=0.5.0 # Dimensionality reduction
+openpyxl>=3.0.0 # Excel files
+scipy>=1.9.0 # Scientific computations
 ```
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 gui/
-├── morphomapping_gui.py  # PySide6 main application
-├── core/                 # Business logic (framework-independent)
-│   ├── config.py        # Configuration constants
-│   ├── file_handling.py # File operations
-│   ├── conversion.py    # DAF to FCS conversion
-│   ├── metadata.py       # Metadata management
-│   ├── analysis.py      # Dimensionality reduction & clustering
-│   └── visualization.py # Plotting utilities
-└── assets/               # Logo and static assets
+├── morphomapping_gui.py # PySide6 main application
+├── core/ # Business logic (framework-independent)
+│ ├── config.py # Configuration constants
+│ ├── file_handling.py # File operations
+│ ├── conversion.py # DAF to FCS conversion
+│ ├── metadata.py # Metadata management
+│ ├── analysis.py # Dimensionality reduction & clustering
+│ └── visualization.py # Plotting utilities
+└── assets/ # Logo and static assets
 ```
 
-## 🔄 Background Processing
+## Background Processing
 
 All compute-intensive operations run in background threads:
 
@@ -160,7 +152,7 @@ All compute-intensive operations run in background threads:
 
 The UI remains responsive during processing.
 
-## 📊 Workflow
+## Workflow
 
 1. **Project Setup**: Set Run-ID, choose project directory
 2. **DAF Files**: Select files (drag & drop or dialog)
@@ -171,18 +163,18 @@ The UI remains responsive during processing.
 7. **Clustering**: Choose algorithm, adjust parameters, start clustering
 8. **Export**: Export results (plots, statistics, features)
 
-## 🎨 Design Features
+## Design Features
 
-- ✅ Header with logo
-- ✅ Project Setup & Status side by side
-- ✅ Metadata: Manual (left) and Upload (right) side by side
-- ✅ Feature chips: Blue for included, red for excluded (same size)
-- ✅ First 10 features visible, rest collapsible
-- ✅ Status with color coding (green/yellow/red)
-- ✅ Auto-numbering for sample_id
-- ✅ Scrollable metadata table (shows ~3 rows)
+- Header with logo
+- Project Setup & Status side by side
+- Metadata: Manual (left) and Upload (right) side by side
+- Feature chips: Blue for included, red for excluded (same size)
+- First 10 features visible, rest collapsible
+- Status with color coding (green/yellow/red)
+- Auto-numbering for sample_id
+- Scrollable metadata table (shows ~3 rows)
 
-## 🚢 Deployment
+## Deployment
 
 ### Create Standalone Executable
 
@@ -190,18 +182,18 @@ The UI remains responsive during processing.
 pip install pyinstaller
 
 pyinstaller --name="MorphoMapping" \
-            --windowed \
-            --onefile \
-            --add-data "core:core" \
-            --add-data "../assets:assets" \
-            morphomapping_gui.py
+ --windowed \
+ --onefile \
+ --add-data "core:core" \
+ --add-data "../assets:assets" \
+ morphomapping_gui.py
 ```
 
 The executable will be in `dist/MorphoMapping.app` (macOS) or `dist/MorphoMapping.exe` (Windows).
 
 See **[PYSIDE6_DEPLOYMENT.md](PYSIDE6_DEPLOYMENT.md)** for details.
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 ### "No module named 'PySide6'"
 ```bash
@@ -219,30 +211,30 @@ Make sure matplotlib backend is set to `QtAgg` (already in code).
 2. Check all dependencies: `pip list`
 3. Start with debug output: `python morphomapping_gui.py 2>&1 | tee debug.log`
 
-## 🌍 Platform Compatibility
+## Platform Compatibility
 
-**✅ PySide6 is fully cross-platform!**
+** PySide6 is fully cross-platform!**
 
-- ✅ **macOS**: Native .app (tested on macOS 13+)
-- ✅ **Windows**: Native .exe (Windows 10/11)
-- ✅ **Linux**: Native application (Ubuntu, Fedora, etc.)
+- **macOS**: Native .app (tested on macOS 13+)
+- **Windows**: Native .exe (Windows 10/11)
+- **Linux**: Native application (Ubuntu, Fedora, etc.)
 
 The same code runs on all platforms.
 
-## 📝 License
+## License
 
 Same license as the MorphoMapping project.
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Please create an issue or pull request on GitHub.
 
-## 📞 Support
+## Support
 
 - **GitHub Issues**: https://github.com/Wguido/MorphoMapping/issues
 - **Documentation**: See [INSTALLATION.md](INSTALLATION.md) and [USER_GUIDE.md](USER_GUIDE.md)
 
 ---
 
-**Version**: 1.0.0  
+**Version**: 1.0.0 
 **Last Updated**: 2025-11-25

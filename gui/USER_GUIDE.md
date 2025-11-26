@@ -22,7 +22,7 @@ MorphoMapping GUI is a desktop application for analyzing ImageStream data (.daf 
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### 1. Installation
 
@@ -40,7 +40,7 @@ A window should open.
 
 ---
 
-## 📋 Step-by-Step Workflow
+## Step-by-Step Workflow
 
 ### Step 1: Project Setup
 
@@ -110,7 +110,7 @@ A window should open.
 #### Save Metadata
 
 1. Click **"💾 Save Metadata"**
-2. Status changes to "✅ Saved"
+2. Status changes to " Saved"
 
 **IMPORTANT:** Save metadata before starting the analysis!
 
@@ -120,7 +120,7 @@ A window should open.
 
 #### Include Features
 
-1. Scroll to the **"4️⃣ Features & Gates Selection"** section
+1. Scroll to the **"4⃣ Features & Gates Selection"** section
 2. In the **"Features to Include"** area, you'll see blue chips
 3. Click a chip to remove it (moves to "Exclude")
 4. Click again to add it back
@@ -148,11 +148,11 @@ A window should open.
 
 #### Choose Method
 
-1. Scroll to the **"5️⃣ Dimensionality Reduction"** section
+1. Scroll to the **"5⃣ Dimensionality Reduction"** section
 2. Select a method:
-   - **DensMAP** (default, recommended)
-   - **UMAP**
-   - **t-SNE**
+ - **DensMAP** (default, recommended)
+ - **UMAP**
+ - **t-SNE**
 
 #### Adjust Parameters
 
@@ -183,9 +183,9 @@ Depending on the method, you'll see different sliders:
 3. Analysis can take several minutes (depending on data size)
 
 **After Completion:**
-- A plot appears in the **"6️⃣ Visualization"** section
-- The **"📊 Download Top10 Features"** button becomes active
-- The **"7️⃣ Clustering"** section becomes visible
+- A plot appears in the **"6⃣ Visualization"** section
+- The **" Download Top10 Features"** button becomes active
+- The **"7⃣ Clustering"** section becomes visible
 
 ---
 
@@ -193,20 +193,20 @@ Depending on the method, you'll see different sliders:
 
 #### Change Color Coding
 
-1. In the **"6️⃣ Visualization"** section, find the **"Color by"** dropdown
+1. In the **"6⃣ Visualization"** section, find the **"Color by"** dropdown
 2. Select an option:
-   - `sample_id`: Color by sample
-   - `group`: Color by group
-   - `replicate`: Color by replicate
-   - Other metadata columns
+ - `sample_id`: Color by sample
+ - `group`: Color by group
+ - `replicate`: Color by replicate
+ - Other metadata columns
 
 **Tip:** The plot updates automatically without recalculation!
 
 #### Adjust Axis Limits
 
 1. Enter values in the fields:
-   - **X Min / X Max**: X-axis limits
-   - **Y Min / Y Max**: Y-axis limits
+ - **X Min / X Max**: X-axis limits
+ - **Y Min / Y Max**: Y-axis limits
 2. Click **"Apply Limits"**
 3. Click **"Reset"** to reset
 
@@ -215,7 +215,7 @@ Depending on the method, you'll see different sliders:
 #### Highlight Cells
 
 1. Enter cell indices in the **"Cell Indices"** field (comma-separated, e.g., `1, 5, 10`)
-2. Click **"✨ Highlight"**
+2. Click **" Highlight"**
 3. Cells are marked as red stars
 
 **Tip:** You can highlight multiple cells at once.
@@ -232,11 +232,11 @@ Depending on the method, you'll see different sliders:
 
 #### Choose Algorithm
 
-1. Scroll to the **"7️⃣ Clustering"** section
+1. Scroll to the **"7⃣ Clustering"** section
 2. Select an algorithm:
-   - **KMeans**: Exact number of clusters (default: 10)
-   - **Gaussian Mixture Models (GMM)**: Probabilistic clustering
-   - **HDBSCAN**: Density-based clustering
+ - **KMeans**: Exact number of clusters (default: 10)
+ - **Gaussian Mixture Models (GMM)**: Probabilistic clustering
+ - **HDBSCAN**: Density-based clustering
 
 #### Adjust Parameters
 
@@ -244,7 +244,7 @@ Parameters change depending on the algorithm:
 
 **KMeans:**
 - **N Clusters**: Number of clusters (default: 10)
-- **📊 Download Elbow Plot**: Shows optimal cluster number
+- ** Download Elbow Plot**: Shows optimal cluster number
 
 **GMM:**
 - **N Clusters**: Number of clusters (default: 10)
@@ -259,9 +259,9 @@ Parameters change depending on the algorithm:
 1. Click **"▶ Run Clustering"**
 2. A progress bar appears
 3. After completion, you'll see:
-   - A cluster plot
-   - A cluster statistics table
-   - Export buttons
+ - A cluster plot
+ - A cluster statistics table
+ - Export buttons
 
 #### Cluster Statistics
 
@@ -278,7 +278,7 @@ The table shows:
 
 #### Export Cluster Statistics
 
-1. Click **"📊 Export Bar Chart"**
+1. Click **" Export Bar Chart"**
 2. Creates a stacked bar chart by groups
 3. Saves as PNG
 
@@ -290,11 +290,11 @@ The table shows:
 
 #### Top 3 Features per Cluster
 
-1. After clustering, find the **"🔍 Top 3 Features per Cluster"** button
+1. After clustering, find the **" Top 3 Features per Cluster"** button
 2. Click it
 3. A CSV file is created with:
-   - Cluster ID
-   - Top 1, 2, 3 features and their values
+ - Cluster ID
+ - Top 1, 2, 3 features and their values
 
 **Location:** `bundle_runs/run_YYYYMMDD_HHMMSS/results/top3_features_per_cluster.csv`
 
@@ -302,29 +302,29 @@ The table shows:
 
 1. Click **"🔥 Cluster-Feature Heatmap"**
 2. Creates a heatmap with:
-   - **Rows**: Features
-   - **Columns**: Clusters
-   - **Values**: Row-wise Z-score
+ - **Rows**: Features
+ - **Columns**: Clusters
+ - **Values**: Row-wise Z-score
 3. Saves:
-   - PNG: `cluster_feature_heatmap.png`
-   - CSV: `cluster_feature_heatmap_data.csv`
+ - PNG: `cluster_feature_heatmap.png`
+ - CSV: `cluster_feature_heatmap_data.csv`
 
 **Usage:** Identifies characteristic features per cluster.
 
 #### Top 10 Features
 
-1. After dimensionality reduction, find **"📊 Download Top10 Features"**
+1. After dimensionality reduction, find **" Download Top10 Features"**
 2. Click it
 3. Calculates the most important features for X and Y dimensions
 4. Saves:
-   - CSV: `top10_features.csv`
-   - Plots: `top10_features_x_dim.png`, `top10_features_y_dim.png`
+ - CSV: `top10_features.csv`
+ - Plots: `top10_features_x_dim.png`, `top10_features_y_dim.png`
 
 **Duration:** Can take several minutes for large datasets.
 
 ---
 
-## 💡 Tips & Tricks
+## Tips & Tricks
 
 ### Performance
 
@@ -347,7 +347,7 @@ The table shows:
 
 ---
 
-## ❓ Frequently Asked Questions (FAQ)
+## Frequently Asked Questions (FAQ)
 
 ### Q: GUI won't start
 
@@ -368,7 +368,7 @@ pip install -e ./
 
 **A:** Check:
 1. `file_name` in metadata exactly matches filename (without .fcs)
-2. Metadata was saved (status shows "✅ Saved")
+2. Metadata was saved (status shows " Saved")
 3. Analysis was started after saving
 
 ### Q: Plot is empty or gray
@@ -394,7 +394,7 @@ pip install -e ./
 
 ---
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 ### "Analysis failed" Error
 
@@ -416,16 +416,16 @@ pip install -e ./
 
 ---
 
-## 📞 Support
+## Support
 
 If you have problems:
 
 1. **Read this guide** again
 2. **Check [INSTALLATION.md](INSTALLATION.md)** for installation issues
 3. **Create a GitHub Issue**: https://github.com/Wguido/MorphoMapping/issues
-   - Describe the problem
-   - Include error messages
-   - Provide system information
+ - Describe the problem
+ - Include error messages
+ - Provide system information
 
 ---
 

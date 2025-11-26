@@ -114,7 +114,7 @@ The function outputs debug information:
 2. Enter metadata
 3. Select features
 4. Run dimensionality reduction
-5. Click "📊 Download Top10 Features" button
+5. Click " Download Top10 Features" button
 
 ## Files
 
