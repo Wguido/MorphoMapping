@@ -25,26 +25,6 @@
  - Architecture
  - Deployment
 
-4. **[README_PYSIDE6.md](README_PYSIDE6.md)**
- - Technical details
- - Framework comparison
- - Background processing
- - Platform compatibility
-
-5. **[PYSIDE6_DEPLOYMENT.md](PYSIDE6_DEPLOYMENT.md)**
- - GitHub compatibility
- - Executable creation
- - Dependencies management
- - Deployment strategies
-
-### For Documentation Authors
-
-6. **[DOCUMENTATION_GUIDE.md](DOCUMENTATION_GUIDE.md)**
- - Guide for writing documentation
- - Structure guidelines
- - Style guide
- - Update checklist
-
 ## Quick Start for New Users
 
 1. Read **[INSTALLATION.md](INSTALLATION.md)** for installation
@@ -68,11 +48,9 @@ gui/
 
 | Document | Target Audience | Difficulty |
 |----------|----------------|------------|
-| INSTALLATION.md | Beginners, Non-programmers | ⭐ Easy |
-| USER_GUIDE.md | End users, Scientists | ⭐⭐ Medium |
-| README.md | Everyone | ⭐⭐ Medium |
-| README_PYSIDE6.md | Developers | ⭐⭐⭐ Advanced |
-| PYSIDE6_DEPLOYMENT.md | System Administrators | ⭐⭐⭐ Advanced |
+| INSTALLATION.md | Beginners, Non-programmers | Easy |
+| USER_GUIDE.md | End users, Scientists | Medium |
+| README.md | Everyone | Medium |
 
 ## Documentation Status
 
@@ -80,17 +58,14 @@ gui/
 - [x] INSTALLATION.md - Detailed installation guide
 - [x] USER_GUIDE.md - Complete user manual
 - [x] README.md - GitHub main documentation
-- [x] README_PYSIDE6.md - Technical overview
-- [x] PYSIDE6_DEPLOYMENT.md - Deployment guide
+- [x] DOCUMENTATION_INDEX.md - Documentation overview
+- [x] GITHUB_ISSUES.md - Known issues
+- [x] GITHUB_ISSUE_TEMPLATES.md - Issue templates
 
-### In Progress
+### Planned
 - [ ] Screenshots for USER_GUIDE.md
-- [ ] Video tutorials (optional)
-
-### 🆕 Planned
 - [ ] Expand FAQ section
 - [ ] Expand troubleshooting guide
-- [ ] Performance tuning guide
 
 ## External Links
 

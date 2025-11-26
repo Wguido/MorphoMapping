@@ -191,8 +191,6 @@ pyinstaller --name="MorphoMapping" \
 
 The executable will be in `dist/MorphoMapping.app` (macOS) or `dist/MorphoMapping.exe` (Windows).
 
-See **[PYSIDE6_DEPLOYMENT.md](PYSIDE6_DEPLOYMENT.md)** for details.
-
 ## Troubleshooting
 
 ### "No module named 'PySide6'"
