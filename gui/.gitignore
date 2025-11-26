@@ -63,3 +63,31 @@ output/
 docs/_build/
 site/
 
+# Old GUI versions (kept locally, not on GitHub)
+app.py
+app_pyside6.py
+app_nicegui_prototype.py
+background_processing.py
+session_state_manager.py
+
+# Development scripts (not needed on GitHub)
+PREPARE_PUSH.sh
+TRANSLATE_REMAINING.sh
+create_github_issues.sh
+test_performance.py
+test_stability.py
+
+# Historical documentation (migration/framework evaluation docs)
+FRAMEWORK_EVALUATION.md
+FRAMEWORK_MIGRATION.md
+FRAMEWORK_RECOMMENDATION.md
+MIGRATION_PLAN.md
+PUSH_INSTRUCTIONS.md
+PUSH_README.md
+RESTART_GUIDE.md
+TESTING.md
+DOCUMENTATION_GUIDE.md
+README_PYSIDE6.md
+PYSIDE6_DEPLOYMENT.md
+COMMIT_MESSAGE.txt
+
