@@ -31,7 +31,7 @@ MAX_POINTS_FOR_VISUALIZATION = 1000000  # Very high limit - effectively disabled
 SAMPLING_METHOD = "random"  # "random" or "stratified"
 
 # Paths
-BUNDLE_ROOT = Path(__file__).resolve().parent.parent
-PROJECT_ROOT = BUNDLE_ROOT.parents[2]
+BUNDLE_ROOT = Path(__file__).resolve().parent.parent  # gui/
+PROJECT_ROOT = BUNDLE_ROOT.parent  # MorphoMapping/ (parent of gui/)
 R_SCRIPT = PROJECT_ROOT / "R" / "daf_to_fcs_cli.R"
 

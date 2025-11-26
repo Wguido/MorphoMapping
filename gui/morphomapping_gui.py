@@ -100,9 +100,13 @@ class ConversionWorker(QThread):
             if result.returncode == 0:
                 self.finished.emit(self.job_id, True, f"✅ {safe_str(self.daf_file.name)} converted")
             else:
-                self.finished.emit(self.job_id, False, f"❌ Error: {result.stderr[:100]}")
+                # Provide more detailed error message
+                error_msg = result.stderr.strip() if result.stderr.strip() else result.stdout.strip()
+                if not error_msg:
+                    error_msg = f"Conversion failed with return code {result.returncode}"
+                self.finished.emit(self.job_id, False, f"❌ Error: {error_msg[:200]}")
         except Exception as e:
-            self.finished.emit(self.job_id, False, f"❌ Exception: {str(e)[:100]}")
+            self.finished.emit(self.job_id, False, f"❌ Exception: {str(e)[:200]}")
 
 
 class AnalysisWorker(QThread):
@@ -1018,6 +1022,8 @@ class MorphoMappingGUI(QMainWindow):
             # Save status to file for later review
             try:
                 status_path = paths["base"] / "run_status.json"
+                # Ensure directory exists before writing
+                status_path.parent.mkdir(parents=True, exist_ok=True)
                 status_data["timestamp"] = datetime.datetime.now().isoformat()
                 status_data["project_dir"] = project_dir
                 status_path.write_text(json.dumps(status_data, indent=2))
@@ -1140,6 +1146,12 @@ class MorphoMappingGUI(QMainWindow):
         layout.addWidget(QLabel("Processing Status:"))
         layout.addWidget(self.processing_status)
         
+        # Remove DAF files button
+        remove_daf_btn = QPushButton("🗑️ Remove DAF Files...")
+        remove_daf_btn.setStyleSheet("background-color: #F44336; color: white; padding: 8px; font-size: 12px;")
+        remove_daf_btn.clicked.connect(self.remove_daf_files)
+        layout.addWidget(remove_daf_btn)
+        
         group.setLayout(layout)
         return group
     
@@ -1154,6 +1166,82 @@ class MorphoMappingGUI(QMainWindow):
         
         if files:
             self.process_daf_files(files)
+    
+    def remove_daf_files(self):
+        """Remove uploaded DAF files."""
+        if not self.session_state.get("run_id"):
+            QMessageBox.warning(self, "Warning", "⚠️ Please set Run-ID first")
+            return
+        
+        project_dir = safe_str(self.session_state.get("project_dir", PROJECT_ROOT))
+        run_id = safe_str(self.session_state["run_id"])
+        paths = get_run_paths(safe_path(project_dir), run_id)
+        
+        # Get list of DAF files
+        daf_files = sorted(paths["raw_daf"].glob("*.daf"))
+        if not daf_files:
+            QMessageBox.information(self, "Info", "No DAF files found to remove.")
+            return
+        
+        # Create dialog to select files to remove
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QListWidget, QPushButton, QHBoxLayout
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Remove DAF Files")
+        dialog.setMinimumWidth(400)
+        
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel("Select DAF files to remove:"))
+        
+        file_list = QListWidget()
+        file_list.setSelectionMode(QListWidget.MultiSelection)
+        for daf_file in daf_files:
+            file_list.addItem(daf_file.name)
+        layout.addWidget(file_list)
+        
+        button_layout = QHBoxLayout()
+        remove_btn = QPushButton("Remove Selected")
+        remove_btn.setStyleSheet("background-color: #F44336; color: white; padding: 8px;")
+        remove_btn.clicked.connect(dialog.accept)
+        button_layout.addWidget(remove_btn)
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(dialog.reject)
+        button_layout.addWidget(cancel_btn)
+        
+        layout.addLayout(button_layout)
+        
+        if dialog.exec() == QDialog.Accepted:
+            selected_items = file_list.selectedItems()
+            if not selected_items:
+                QMessageBox.warning(self, "Warning", "No files selected.")
+                return
+            
+            removed_count = 0
+            for item in selected_items:
+                file_name = item.text()
+                daf_path = paths["raw_daf"] / file_name
+                fcs_path = paths["fcs"] / f"{safe_str(daf_path.stem)}.fcs"
+                
+                # Remove DAF file
+                if daf_path.exists():
+                    daf_path.unlink()
+                    removed_count += 1
+                
+                # Remove corresponding FCS file if it exists
+                if fcs_path.exists():
+                    fcs_path.unlink()
+                
+                # Remove from uploaded_files list
+                self.session_state["uploaded_files"] = [
+                    f for f in self.session_state["uploaded_files"] 
+                    if f.get("name") != file_name
+                ]
+            
+            QMessageBox.information(self, "Success", f"✅ Removed {removed_count} DAF file(s)")
+            self.update_status()
+            self.load_features_and_gates()
+            self.update_metadata_display()
     
     def on_conversion_finished(self, job_id: str, success: bool, message: str, worker: ConversionWorker):
         """Handle conversion completion."""
@@ -3595,77 +3683,180 @@ class MorphoMappingGUI(QMainWindow):
                 return
             
             # Calculate figure size - make it larger for better visibility
-            fig_width = max(10, n_clusters * 1.0)
-            fig_height = max(8, n_features * 0.4)
-            fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+            # More space for features on Y-axis and clusters on X-axis
+            fig_width = max(12, n_clusters * 1.2)
+            fig_height = max(10, n_features * 0.5)
             
-            # Use seaborn if available, otherwise matplotlib
+            # Use seaborn.clustermap for dendrograms, or seaborn.heatmap as fallback
             try:
                 import seaborn as sns
-                # seaborn.heatmap: rows (y-axis) = index, columns (x-axis) = columns
-                # heatmap_z: index = Features, columns = Clusters
-                # So: Y-axis = Features, X-axis = Clusters (correct!)
-                sns.heatmap(
-                    heatmap_z,
-                    cmap="RdYlBu_r",
-                    center=0,
-                    vmin=-3,
-                    vmax=3,
-                    cbar_kws={"label": "Z-score"},
-                    ax=ax,
-                    xticklabels=True,
-                    yticklabels=True if n_features <= 50 else False,  # Hide y-labels if too many
-                    linewidths=0.1,
-                    linecolor='gray',
-                    square=False
-                )
-                # Show y-labels for features if not too many
-                if n_features <= 50:
-                    ax.set_yticklabels(heatmap_z.index, rotation=0, fontsize=8)
-                else:
-                    # Show every Nth feature label
-                    step = max(1, n_features // 50)
-                    ax.set_yticks(range(0, n_features, step))
-                    ax.set_yticklabels([heatmap_z.index[i] for i in range(0, n_features, step)], rotation=0, fontsize=7)
                 
-                # Ensure correct axis labels
-                ax.set_xlabel("Cluster", fontsize=12, fontweight="bold")
-                ax.set_ylabel("Feature", fontsize=12, fontweight="bold")
+                # Try clustermap first (with dendrograms)
+                try:
+                    # clustermap: rows (y-axis) = index, columns (x-axis) = columns
+                    # heatmap_z: index = Features (rows), columns = Clusters (columns)
+                    # row_cluster=True: cluster features (Y-axis)
+                    # col_cluster=True: cluster clusters (X-axis)
+                    g = sns.clustermap(
+                        heatmap_z,
+                        cmap="RdYlBu_r",
+                        center=0,
+                        vmin=-3,
+                        vmax=3,
+                        row_cluster=True,  # Cluster features (Y-axis)
+                        col_cluster=True,  # Cluster clusters (X-axis)
+                        method='ward',  # Linkage method
+                        metric='euclidean',
+                        figsize=(fig_width, fig_height),
+                        cbar_kws={"label": "Z-score (row-wise)"},
+                        xticklabels=True,
+                        yticklabels=True if n_features <= 100 else False,
+                        linewidths=0.1,
+                        linecolor='gray',
+                        cbar_pos=(0.02, 0.8, 0.03, 0.15)  # Position colorbar
+                    )
+                    
+                    # Set axis labels
+                    g.ax_row_dendrogram.set_visible(True)
+                    g.ax_col_dendrogram.set_visible(True)
+                    g.ax_heatmap.set_xlabel("Cluster", fontsize=12, fontweight="bold")
+                    g.ax_heatmap.set_ylabel("Feature", fontsize=12, fontweight="bold")
+                    
+                    # Rotate cluster labels on X-axis
+                    g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=45, ha='right', fontsize=9)
+                    
+                    # Show feature labels on Y-axis (if not too many)
+                    if n_features <= 100:
+                        g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0, fontsize=7)
+                    else:
+                        # Show every Nth feature
+                        step = max(1, n_features // 100)
+                        yticks = g.ax_heatmap.get_yticks()
+                        yticklabels = [heatmap_z.index[int(i)] if i < len(heatmap_z.index) else '' for i in yticks[::step]]
+                        g.ax_heatmap.set_yticks(yticks[::step])
+                        g.ax_heatmap.set_yticklabels(yticklabels, rotation=0, fontsize=6)
+                    
+                    g.fig.suptitle(
+                        f"Cluster-Feature Heatmap (Row-wise Z-score)\n{n_features} Features × {n_clusters} Clusters",
+                        fontsize=14,
+                        fontweight="bold",
+                        y=0.98
+                    )
+                    
+                    plt.tight_layout()
+                    
+                    # Save
+                    paths["results"].mkdir(parents=True, exist_ok=True)
+                    output_path = paths["results"] / "cluster_feature_heatmap.png"
+                    g.savefig(output_path, dpi=300, bbox_inches="tight")
+                    plt.close(g.fig)
+                    
+                except Exception as clustermap_error:
+                    print(f"DEBUG: clustermap failed ({clustermap_error}), falling back to heatmap")
+                    # Fallback to regular heatmap without dendrograms
+                    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+                    
+                    # seaborn.heatmap: rows (y-axis) = index, columns (x-axis) = columns
+                    # heatmap_z: index = Features (rows), columns = Clusters (columns)
+                    sns.heatmap(
+                        heatmap_z,
+                        cmap="RdYlBu_r",
+                        center=0,
+                        vmin=-3,
+                        vmax=3,
+                        cbar_kws={"label": "Z-score (row-wise)"},
+                        ax=ax,
+                        xticklabels=True,
+                        yticklabels=True if n_features <= 100 else False,
+                        linewidths=0.1,
+                        linecolor='gray',
+                        square=False
+                    )
+                    
+                    # X-axis: clusters (columns) - horizontal
+                    ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right', fontsize=9)
+                    
+                    # Y-axis: features (index/rows) - vertical
+                    if n_features <= 100:
+                        ax.set_yticklabels(heatmap_z.index, rotation=0, fontsize=7)
+                    else:
+                        # Show every Nth feature label
+                        step = max(1, n_features // 100)
+                        yticks = range(0, n_features, step)
+                        ax.set_yticks(yticks)
+                        ax.set_yticklabels([heatmap_z.index[i] for i in yticks], rotation=0, fontsize=6)
+                    
+                    # Ensure correct axis labels
+                    ax.set_xlabel("Cluster", fontsize=12, fontweight="bold")
+                    ax.set_ylabel("Feature", fontsize=12, fontweight="bold")
+                    ax.set_title(
+                        f"Cluster-Feature Heatmap (Row-wise Z-score)\n{n_features} Features × {n_clusters} Clusters",
+                        fontsize=14,
+                        fontweight="bold"
+                    )
+                    
+                    plt.tight_layout()
+                    
+                    # Save
+                    paths["results"].mkdir(parents=True, exist_ok=True)
+                    output_path = paths["results"] / "cluster_feature_heatmap.png"
+                    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+                    plt.close(fig)
+                    
             except ImportError:
-                # Fallback to matplotlib
+                # Fallback to matplotlib (no seaborn available)
+                fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+                
                 # imshow: first dimension (rows) = y-axis, second dimension (columns) = x-axis
                 # heatmap_z.values: rows = Features, columns = Clusters
-                # So: Y-axis = Features, X-axis = Clusters (correct!)
-                im = ax.imshow(heatmap_z.values, cmap="RdYlBu_r", aspect='auto', vmin=-3, vmax=3, origin='upper', interpolation='nearest')
+                # So: Y-axis = Features, X-axis = Clusters
+                im = ax.imshow(
+                    heatmap_z.values,
+                    cmap="RdYlBu_r",
+                    aspect='auto',
+                    vmin=-3,
+                    vmax=3,
+                    origin='upper',
+                    interpolation='nearest'
+                )
                 
-                # X-axis: clusters (columns)
+                # X-axis: clusters (columns) - horizontal
                 ax.set_xticks(range(n_clusters))
-                ax.set_xticklabels([str(int(c)) if isinstance(c, (int, float)) else str(c) for c in heatmap_z.columns], rotation=45, ha='right', fontsize=10)
+                ax.set_xticklabels(
+                    [str(int(c)) if isinstance(c, (int, float)) else str(c) for c in heatmap_z.columns],
+                    rotation=45,
+                    ha='right',
+                    fontsize=9
+                )
                 
-                # Y-axis: features (index/rows)
-                if n_features <= 50:
+                # Y-axis: features (index/rows) - vertical
+                if n_features <= 100:
                     ax.set_yticks(range(n_features))
-                    ax.set_yticklabels(heatmap_z.index, rotation=0, fontsize=8)
+                    ax.set_yticklabels(heatmap_z.index, rotation=0, fontsize=7)
                 else:
                     # Show every Nth label
-                    step = max(1, n_features // 50)
-                    ax.set_yticks(range(0, n_features, step))
-                    ax.set_yticklabels([heatmap_z.index[i] for i in range(0, n_features, step)], rotation=0, fontsize=7)
+                    step = max(1, n_features // 100)
+                    yticks = range(0, n_features, step)
+                    ax.set_yticks(yticks)
+                    ax.set_yticklabels([heatmap_z.index[i] for i in yticks], rotation=0, fontsize=6)
                 
-                plt.colorbar(im, ax=ax, label="Z-score")
+                plt.colorbar(im, ax=ax, label="Z-score (row-wise)")
                 
                 ax.set_xlabel("Cluster", fontsize=12, fontweight="bold")
                 ax.set_ylabel("Feature", fontsize=12, fontweight="bold")
-            
-            ax.set_title(f"Cluster-Feature Heatmap (Row-wise Z-score)\n{n_features} Features × {n_clusters} Clusters", fontsize=14, fontweight="bold")
-            
-            plt.tight_layout()
-            
-            # Save
-            paths["results"].mkdir(parents=True, exist_ok=True)
-            output_path = paths["results"] / "cluster_feature_heatmap.png"
-            plt.savefig(output_path, dpi=300, bbox_inches="tight")
-            plt.close(fig)
+                ax.set_title(
+                    f"Cluster-Feature Heatmap (Row-wise Z-score)\n{n_features} Features × {n_clusters} Clusters",
+                    fontsize=14,
+                    fontweight="bold"
+                )
+                
+                plt.tight_layout()
+                
+                # Save
+                paths["results"].mkdir(parents=True, exist_ok=True)
+                output_path = paths["results"] / "cluster_feature_heatmap.png"
+                plt.savefig(output_path, dpi=300, bbox_inches="tight")
+                plt.close(fig)
             
             # Also save the data
             data_path = paths["results"] / "cluster_feature_heatmap_data.csv"
