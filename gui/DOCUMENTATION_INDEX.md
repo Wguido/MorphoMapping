@@ -4,7 +4,7 @@
 
 ### For End Users
 
-1. **[INSTALLATION.md](INSTALLATION.md)** ⭐ **START HERE!**
+1. **[INSTALLATION.md](INSTALLATION.md)** **START HERE!**
  - Detailed installation guide
  - Step-by-step for beginners
  - Troubleshooting
@@ -31,17 +31,16 @@
 2. Follow **[USER_GUIDE.md](USER_GUIDE.md)** for first steps
 3. If you have problems: See troubleshooting in both documents
 
-## 📖 Documentation Structure
+## Documentation Structure
 
 ```
 gui/
-├── README.md # Main documentation (GitHub)
-├── INSTALLATION.md # Installation guide (beginner-friendly)
-├── USER_GUIDE.md # User manual
-├── README_PYSIDE6.md # Technical overview
-├── PYSIDE6_DEPLOYMENT.md # Deployment guide
-├── DOCUMENTATION_GUIDE.md # Guide for authors
-└── DOCUMENTATION_INDEX.md # This file
+├── README.md                    # Main documentation (GitHub)
+├── INSTALLATION.md              # Installation guide (beginner-friendly)
+├── USER_GUIDE.md               # User manual
+├── DOCUMENTATION_INDEX.md      # This file
+├── GITHUB_ISSUES.md           # Known issues
+└── GITHUB_ISSUE_TEMPLATES.md  # Issue templates
 ```
 
 ## Target Audiences
