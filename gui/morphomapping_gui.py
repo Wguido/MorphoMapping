@@ -350,16 +350,9 @@ class AnalysisWorker(QThread):
             # Store file processing info (skipped_files, usable_files)
             self.session_state["analysis_info"] = info
             
-            # Save config
-            run_config = {
-                "project_dir": str(self.paths["base"].parent.parent),
-                "run_id": self.session_state["run_id"],
-                "features": self.features,
-                "population": self.population,
-                "method": self.method,
-                "parameters": self.method_params,
-            }
-            (self.paths["base"] / "run_config.json").write_text(json.dumps(run_config, indent=2))
+            # Store method and params for later saving in GUI
+            self.session_state["last_dim_reduction_method"] = self.method
+            self.session_state["last_dim_reduction_params"] = self.method_params
             
             self.finished.emit(True, f"✅ {self.method} analysis completed successfully!")
             
@@ -494,26 +487,26 @@ class FeatureImportanceWorker(QThread):
             else:
                 # Fallback: sample-based merging
                 combined_with_coords = []
-            for sample_id in combined_data["sample_id"].unique():
-                sample_data = combined_data[combined_data["sample_id"] == sample_id].copy()
-                sample_embedding = embedding_subset[embedding_subset["sample_id"] == sample_id].copy()
+                for sample_id in combined_data["sample_id"].unique():
+                    sample_data = combined_data[combined_data["sample_id"] == sample_id].copy()
+                    sample_embedding = embedding_subset[embedding_subset["sample_id"] == sample_id].copy()
+                    
+                    # Sample same number of cells from embedding
+                    n_cells = len(sample_data)
+                    if len(sample_embedding) >= n_cells:
+                        sample_embedding = sample_embedding.sample(n=n_cells, random_state=42).reset_index(drop=True)
+                    else:
+                        # If embedding has fewer cells, repeat the last ones
+                        while len(sample_embedding) < n_cells:
+                            sample_embedding = pd.concat([sample_embedding, sample_embedding.iloc[-1:]], ignore_index=True)
+                        sample_embedding = sample_embedding.iloc[:n_cells]
+                    
+                    # Add coordinates
+                    sample_data["x"] = sample_embedding["x"].values
+                    sample_data["y"] = sample_embedding["y"].values
+                    combined_with_coords.append(sample_data)
                 
-                # Sample same number of cells from embedding
-                n_cells = len(sample_data)
-                if len(sample_embedding) >= n_cells:
-                    sample_embedding = sample_embedding.sample(n=n_cells, random_state=42).reset_index(drop=True)
-                else:
-                    # If embedding has fewer cells, repeat the last ones
-                    while len(sample_embedding) < n_cells:
-                        sample_embedding = pd.concat([sample_embedding, sample_embedding.iloc[-1:]], ignore_index=True)
-                    sample_embedding = sample_embedding.iloc[:n_cells]
-                
-                # Add coordinates
-                sample_data["x"] = sample_embedding["x"].values
-                sample_data["y"] = sample_embedding["y"].values
-                combined_with_coords.append(sample_data)
-            
-            combined_data = pd.concat(combined_with_coords, ignore_index=True)
+                combined_data = pd.concat(combined_with_coords, ignore_index=True)
             
             # Remove rows without coordinates
             combined_data = combined_data[combined_data["x"].notna() & combined_data["y"].notna()]
@@ -747,30 +740,63 @@ class FeatureImportanceWorker(QThread):
                     # Ensure df is a fresh copy
                     mm.df = mm.df.copy()
                 
-                # Calculate feature importance manually to avoid multiprocessing issues
-                # MM.feature_importance uses RandomForestRegressor which uses multiprocessing by default
-                # We calculate it ourselves with n_jobs=1 to disable multiprocessing
+                # TWO-STAGE APPROACH: Fast preselection + detailed calculation
+                # This reduces computation time significantly for large feature sets (150-200 features)
                 from sklearn.ensemble import RandomForestRegressor
                 from sklearn.model_selection import train_test_split
                 from sklearn.preprocessing import MinMaxScaler
                 
-                # Calculate feature importance manually to avoid multiprocessing issues
+                # Prepare data
                 data = mm.df.copy()
                 data = data.drop('y', axis=1)  # Drop indep
                 
                 # Split data
                 train_df, test_df = train_test_split(data, test_size=0.2, random_state=42)
-                X_train = train_df.drop('x', axis=1)  # Drop dep
+                X_train_full = train_df.drop('x', axis=1)  # Drop dep
                 y_train = train_df['x']
-                X_test = test_df.drop('x', axis=1)
-                y_test = test_df['x']
+                num_features = len(X_train_full.columns)
                 
-                # Run RandomForestRegressor with n_jobs=1 to disable multiprocessing
-                model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=1)
-                model.fit(X_train, y_train)
+                print(f"DEBUG: Starting two-stage calculation for {num_features} features...")
                 
-                # Get feature importance
-                importance = model.feature_importances_
+                # STAGE 1: Fast preselection with fewer trees (all features)
+                # Use only 20 trees for quick preselection
+                if num_features > 50:
+                    print(f"DEBUG: Stage 1: Fast preselection with 20 trees (all {num_features} features)...")
+                    model_preselect = RandomForestRegressor(n_estimators=20, random_state=42, n_jobs=1, max_depth=10)
+                    model_preselect.fit(X_train_full, y_train)
+                    
+                    # Get importance from preselection
+                    importance_preselect = model_preselect.feature_importances_
+                    
+                    # Select top 50 features for detailed calculation
+                    top_n_preselect = min(50, num_features)
+                    s_id_preselect = np.argsort(importance_preselect)[-top_n_preselect:]
+                    selected_features = X_train_full.columns[s_id_preselect].tolist()
+                    
+                    print(f"DEBUG: Stage 1 complete: Selected top {top_n_preselect} features for detailed calculation")
+                    
+                    # STAGE 2: Detailed calculation with more trees (only top features)
+                    X_train_selected = X_train_full[selected_features]
+                    print(f"DEBUG: Stage 2: Detailed calculation with 100 trees (top {top_n_preselect} features)...")
+                    
+                    model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=1)
+                    model.fit(X_train_selected, y_train)
+                    
+                    # Get feature importance (only for selected features)
+                    importance_selected = model.feature_importances_
+                    
+                    # Map back to full feature set
+                    importance = np.zeros(num_features)
+                    for i, feat_idx in enumerate(s_id_preselect):
+                        importance[feat_idx] = importance_selected[i]
+                    
+                    print(f"DEBUG: Stage 2 complete: Calculated importance for top {top_n_preselect} features")
+                else:
+                    # If <= 50 features, skip preselection and use full calculation
+                    print(f"DEBUG: {num_features} features <= 50, skipping preselection, using full calculation...")
+                    model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=1)
+                    model.fit(X_train_full, y_train)
+                    importance = model.feature_importances_
                 
                 # Sort and get top 10
                 s_id = np.argsort(importance)
@@ -784,7 +810,7 @@ class FeatureImportanceWorker(QThread):
                 percentage_importance = (importance_scaled / total_importance) * 100
                 
                 # Create DataFrame matching MM.feature_importance output format
-                feature_names = X_train.columns[s_id]
+                feature_names = X_train_full.columns[s_id]
                 features_x = pd.DataFrame({
                     "index1": feature_names,
                     "importance_normalized": importance_scaled[s_id],
@@ -830,23 +856,62 @@ class FeatureImportanceWorker(QThread):
                 import sys
                 sys.stdout.flush()  # Force output to console
                 
-                # Calculate feature importance for Y dimension manually (no multiprocessing)
+                # TWO-STAGE APPROACH: Fast preselection + detailed calculation
+                from sklearn.ensemble import RandomForestRegressor
+                from sklearn.model_selection import train_test_split
+                from sklearn.preprocessing import MinMaxScaler
+                
+                # Prepare data
                 data = mm.df.copy()
                 data = data.drop('x', axis=1)  # Drop indep
                 
                 # Split data
                 train_df, test_df = train_test_split(data, test_size=0.2, random_state=42)
-                X_train = train_df.drop('y', axis=1)  # Drop dep
+                X_train_full = train_df.drop('y', axis=1)  # Drop dep
                 y_train = train_df['y']
-                X_test = test_df.drop('y', axis=1)
-                y_test = test_df['y']
+                num_features = len(X_train_full.columns)
                 
-                # Run RandomForestRegressor with n_jobs=1 to disable multiprocessing
-                model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=1)
-                model.fit(X_train, y_train)
+                print(f"DEBUG: Starting two-stage calculation for {num_features} features...")
                 
-                # Get feature importance
-                importance = model.feature_importances_
+                # STAGE 1: Fast preselection with fewer trees (all features)
+                # Use only 20 trees for quick preselection
+                if num_features > 50:
+                    print(f"DEBUG: Stage 1: Fast preselection with 20 trees (all {num_features} features)...")
+                    model_preselect = RandomForestRegressor(n_estimators=20, random_state=42, n_jobs=1, max_depth=10)
+                    model_preselect.fit(X_train_full, y_train)
+                    
+                    # Get importance from preselection
+                    importance_preselect = model_preselect.feature_importances_
+                    
+                    # Select top 50 features for detailed calculation
+                    top_n_preselect = min(50, num_features)
+                    s_id_preselect = np.argsort(importance_preselect)[-top_n_preselect:]
+                    selected_features = X_train_full.columns[s_id_preselect].tolist()
+                    
+                    print(f"DEBUG: Stage 1 complete: Selected top {top_n_preselect} features for detailed calculation")
+                    
+                    # STAGE 2: Detailed calculation with more trees (only top features)
+                    X_train_selected = X_train_full[selected_features]
+                    print(f"DEBUG: Stage 2: Detailed calculation with 100 trees (top {top_n_preselect} features)...")
+                    
+                    model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=1)
+                    model.fit(X_train_selected, y_train)
+                    
+                    # Get feature importance (only for selected features)
+                    importance_selected = model.feature_importances_
+                    
+                    # Map back to full feature set
+                    importance = np.zeros(num_features)
+                    for i, feat_idx in enumerate(s_id_preselect):
+                        importance[feat_idx] = importance_selected[i]
+                    
+                    print(f"DEBUG: Stage 2 complete: Calculated importance for top {top_n_preselect} features")
+                else:
+                    # If <= 50 features, skip preselection and use full calculation
+                    print(f"DEBUG: {num_features} features <= 50, skipping preselection, using full calculation...")
+                    model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=1)
+                    model.fit(X_train_full, y_train)
+                    importance = model.feature_importances_
                 
                 # Sort and get top 10
                 s_id = np.argsort(importance)
@@ -860,7 +925,7 @@ class FeatureImportanceWorker(QThread):
                 percentage_importance = (importance_scaled / total_importance) * 100
                 
                 # Create DataFrame matching MM.feature_importance output format
-                feature_names = X_train.columns[s_id]
+                feature_names = X_train_full.columns[s_id]
                 features_y = pd.DataFrame({
                     "index1": feature_names,
                     "importance_normalized": importance_scaled[s_id],
@@ -1402,6 +1467,59 @@ class MorphoMappingGUI(QMainWindow):
         
         self.status_layout.addStretch()
     
+    def _save_run_info(self, paths: Dict[str, Path], daf_files: Optional[List[Dict]] = None, 
+                       dim_reduction: Optional[Dict] = None, clustering: Optional[Dict] = None):
+        """Save comprehensive run information to run_info.json.
+        
+        This file contains all information about the run:
+        - DAF files used (original paths, not copies)
+        - Dimensionality reduction settings (DensMAP, UMAP, etc.)
+        - Clustering settings (method, parameters, etc.)
+        - All other run metadata
+        """
+        try:
+            info_path = paths["base"] / "run_info.json"
+            
+            # Load existing info if it exists
+            if info_path.exists():
+                try:
+                    existing_info = json.loads(info_path.read_text())
+                except:
+                    existing_info = {}
+            else:
+                existing_info = {}
+            
+            # Update with new information
+            if daf_files is not None:
+                existing_info["daf_files"] = daf_files
+                existing_info["daf_files_count"] = len(daf_files)
+            
+            if dim_reduction is not None:
+                existing_info["dimensionality_reduction"] = dim_reduction
+            
+            if clustering is not None:
+                existing_info["clustering"] = clustering
+            
+            # Always update metadata
+            existing_info["run_id"] = self.session_state.get("run_id", "Unknown")
+            existing_info["project_dir"] = str(paths["base"].parent.parent)
+            existing_info["timestamp"] = datetime.datetime.now().isoformat()
+            
+            # Save features and population if available
+            if "features" not in existing_info and self.session_state.get("features"):
+                existing_info["features"] = self.session_state["features"]
+                existing_info["features_count"] = len(self.session_state["features"])
+            
+            if "population" not in existing_info and self.session_state.get("selected_population"):
+                existing_info["population"] = self.session_state["selected_population"]
+            
+            # Save to file
+            info_path.parent.mkdir(parents=True, exist_ok=True)
+            info_path.write_text(json.dumps(existing_info, indent=2))
+            
+        except Exception as e:
+            print(f"Warning: Could not save run info: {e}")
+    
     def dragEnterEvent(self, event: QDragEnterEvent):
         """Handle drag enter event."""
         if event.mimeData().hasUrls():
@@ -1430,26 +1548,34 @@ class MorphoMappingGUI(QMainWindow):
         paths["raw_daf"].mkdir(parents=True, exist_ok=True)
         paths["fcs"].mkdir(parents=True, exist_ok=True)
         
+        # Store original DAF file paths (don't copy to save disk space)
+        daf_file_info = []
+        
         for file_path_str in file_paths:
             file_path = safe_path(file_path_str)
             file_name = safe_str(file_path.name)
             
-            # Copy to raw_daf directory
-            dest_path = safe_path(paths["raw_daf"]) / file_name
-            import shutil
-            shutil.copy2(file_path, dest_path)
+            # Store original path instead of copying
+            # The .daf files are only needed for conversion, not for later analysis
+            original_path = str(file_path)
             
             self.session_state["uploaded_files"].append({
                 "name": file_name,
-                "path": str(dest_path),
-                "size": dest_path.stat().st_size,
+                "path": original_path,  # Store original path
+                "size": file_path.stat().st_size,
             })
             
-            # Start background conversion
-            fcs_path = safe_path(paths["fcs"]) / f"{safe_str(dest_path.stem)}.fcs"
+            daf_file_info.append({
+                "name": file_name,
+                "original_path": original_path,
+                "size": file_path.stat().st_size,
+            })
+            
+            # Start background conversion (use original path)
+            fcs_path = safe_path(paths["fcs"]) / f"{safe_str(file_path.stem)}.fcs"
             job_id = f"convert_{file_name}_{datetime.datetime.now().timestamp()}"
             
-            worker = ConversionWorker(dest_path, fcs_path, job_id)
+            worker = ConversionWorker(file_path, fcs_path, job_id)
             worker.finished.connect(
                 lambda job_id, success, msg, w=worker: self.on_conversion_finished(job_id, success, msg, w)
             )
@@ -1465,6 +1591,10 @@ class MorphoMappingGUI(QMainWindow):
             self.processing_status.append(f"🔄 Converting {file_name}...")
         
         self.daf_files_label.setText(f"Selected {len(file_paths)} file(s)")
+        
+        # Save DAF file information to run info
+        self._save_run_info(paths, daf_files=daf_file_info)
+        
         self.update_status()
         self.load_features_and_gates()
     
@@ -2612,6 +2742,27 @@ class MorphoMappingGUI(QMainWindow):
         
         if success:
             QMessageBox.information(self, "Success", message)
+            
+            # Save comprehensive run info with all settings
+            project_dir = safe_str(self.session_state.get("project_dir", PROJECT_ROOT))
+            run_id = safe_str(self.session_state["run_id"])
+            paths = get_run_paths(safe_path(project_dir), run_id)
+            
+            method = self.session_state.get("last_dim_reduction_method", "Unknown")
+            method_params = self.session_state.get("last_dim_reduction_params", {})
+            features = self.session_state.get("features", [])
+            population = self.session_state.get("selected_population")
+            
+            self._save_run_info(
+                paths,
+                dim_reduction={
+                    "method": method,
+                    "parameters": method_params,
+                    "features": features,
+                    "population": population,
+                }
+            )
+            
             self.update_status()
             
             # Force update of sections visibility
@@ -3607,6 +3758,27 @@ class MorphoMappingGUI(QMainWindow):
         """Handle clustering completion."""
         if success:
             QMessageBox.information(self, "Success", message)
+            
+            # Save clustering info to run info
+            project_dir = safe_str(self.session_state.get("project_dir", PROJECT_ROOT))
+            run_id = safe_str(self.session_state["run_id"])
+            paths = get_run_paths(safe_path(project_dir), run_id)
+            
+            cluster_method = self.session_state.get("cluster_method", "Unknown")
+            n_clusters = len(set(self.session_state["cluster_labels"])) - (1 if -1 in self.session_state["cluster_labels"] else 0)
+            cluster_params = {}
+            if hasattr(worker, 'method_params'):
+                cluster_params = worker.method_params
+            
+            self._save_run_info(
+                paths,
+                clustering={
+                    "method": cluster_method,
+                    "n_clusters": n_clusters,
+                    "parameters": cluster_params,
+                }
+            )
+            
             self.update_status()
             self.update_cluster_plot()
         else:
@@ -4736,12 +4908,227 @@ class MorphoMappingGUI(QMainWindow):
         """Show documentation in a dialog window."""
         dialog = QDialog(self)
         dialog.setWindowTitle("MorphoMapping - Documentation")
-        dialog.setMinimumSize(900, 700)
+        dialog.setMinimumSize(1000, 800)
         
         layout = QVBoxLayout(dialog)
+        layout.setSpacing(10)
+        layout.setContentsMargins(15, 15, 15, 15)
         
         # Create tab widget for different documentation sections
         tabs = QTabWidget()
+        tabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #ddd;
+                background-color: #fafafa;
+                border-radius: 4px;
+            }
+            QTabBar::tab {
+                background-color: #e0e0e0;
+                color: #333;
+                padding: 10px 20px;
+                margin-right: 2px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                font-size: 13px;
+                font-weight: bold;
+            }
+            QTabBar::tab:selected {
+                background-color: #4CAF50;
+                color: white;
+            }
+            QTabBar::tab:hover {
+                background-color: #c0c0c0;
+            }
+        """)
+        
+        # Common style for all text editors
+        text_edit_style = """
+            QTextEdit {
+                background-color: #ffffff;
+                color: #212121;
+                font-family: 'Segoe UI', 'Arial', sans-serif;
+                font-size: 13px;
+                line-height: 1.6;
+                padding: 15px;
+                border: 1px solid #e0e0e0;
+                border-radius: 4px;
+            }
+        """
+        
+        # Helper function to convert Markdown to HTML with formatting
+        def markdown_to_html(markdown_text: str) -> str:
+            """Convert Markdown text to HTML with proper formatting."""
+            import re
+            
+            lines = markdown_text.split('\n')
+            result_lines = []
+            in_list = False
+            list_type = None
+            
+            for line in lines:
+                line_stripped = line.strip()
+                
+                # Headers (process first to avoid conflicts)
+                if re.match(r'^#### ', line):
+                    text = re.sub(r'^#### ', '', line).strip()
+                    result_lines.append(f'<h4 style="color: #1976D2; margin-top: 18px; margin-bottom: 8px; font-size: 15px;"><b>{text}</b></h4>')
+                    if in_list:
+                        result_lines.append(f'</{list_type}>')
+                        in_list = False
+                elif re.match(r'^### ', line):
+                    text = re.sub(r'^### ', '', line).strip()
+                    result_lines.append(f'<h3 style="color: #1976D2; margin-top: 20px; margin-bottom: 10px; font-size: 16px;"><b>{text}</b></h3>')
+                    if in_list:
+                        result_lines.append(f'</{list_type}>')
+                        in_list = False
+                elif re.match(r'^## ', line):
+                    text = re.sub(r'^## ', '', line).strip()
+                    result_lines.append(f'<h2 style="color: #1565C0; margin-top: 25px; margin-bottom: 12px; font-size: 18px;"><b>{text}</b></h2>')
+                    if in_list:
+                        result_lines.append(f'</{list_type}>')
+                        in_list = False
+                elif re.match(r'^# ', line):
+                    text = re.sub(r'^# ', '', line).strip()
+                    result_lines.append(f'<h1 style="color: #0D47A1; margin-top: 30px; margin-bottom: 15px; font-size: 22px;"><b>{text}</b></h1>')
+                    if in_list:
+                        result_lines.append(f'</{list_type}>')
+                        in_list = False
+                # Lists
+                elif re.match(r'^[-*] ', line):
+                    if not in_list:
+                        result_lines.append('<ul style="margin-left: 20px; margin-top: 10px; margin-bottom: 10px;">')
+                        in_list = True
+                        list_type = 'ul'
+                    item_text = re.sub(r'^[-*] ', '', line).strip()
+                    # Process inline formatting in list items
+                    item_text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', item_text)
+                    item_text = re.sub(r'(?<!\*)\*(?!\*)([^*]+?)(?<!\*)\*(?!\*)', r'<i>\1</i>', item_text)
+                    item_text = re.sub(r'`([^`]+)`', r'<code style="background-color: #f5f5f5; padding: 2px 6px; border-radius: 3px; font-family: monospace;">\1</code>', item_text)
+                    result_lines.append(f'<li style="margin-bottom: 5px;">{item_text}</li>')
+                elif re.match(r'^\d+\. ', line):
+                    if not in_list or list_type != 'ol':
+                        if in_list:
+                            result_lines.append(f'</{list_type}>')
+                        result_lines.append('<ol style="margin-left: 20px; margin-top: 10px; margin-bottom: 10px;">')
+                        in_list = True
+                        list_type = 'ol'
+                    item_text = re.sub(r'^\d+\. ', '', line).strip()
+                    # Process inline formatting in list items
+                    item_text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', item_text)
+                    item_text = re.sub(r'(?<!\*)\*(?!\*)([^*]+?)(?<!\*)\*(?!\*)', r'<i>\1</i>', item_text)
+                    item_text = re.sub(r'`([^`]+)`', r'<code style="background-color: #f5f5f5; padding: 2px 6px; border-radius: 3px; font-family: monospace;">\1</code>', item_text)
+                    result_lines.append(f'<li style="margin-bottom: 5px;">{item_text}</li>')
+                # Empty line
+                elif not line_stripped:
+                    if in_list:
+                        result_lines.append(f'</{list_type}>')
+                        in_list = False
+                    result_lines.append('<br>')
+                # Regular paragraph
+                else:
+                    if in_list:
+                        result_lines.append(f'</{list_type}>')
+                        in_list = False
+                    
+                    # Check for tables (Markdown table format: | col1 | col2 |)
+                    if re.match(r'^\|', line) and '|' in line[1:]:
+                        # This is a table row
+                        if not hasattr(markdown_to_html, '_in_table'):
+                            markdown_to_html._in_table = True
+                            markdown_to_html._table_rows = []
+                            markdown_to_html._is_header = True
+                        
+                        cells = [cell.strip() for cell in line.split('|')[1:-1]]  # Remove empty first/last
+                        if markdown_to_html._is_header:
+                            # Header row
+                            markdown_to_html._table_headers = cells
+                            markdown_to_html._is_header = False
+                        elif re.match(r'^[\s\-:]+$', line):  # Separator row (|---|---|)
+                            # Skip separator
+                            pass
+                        else:
+                            # Data row
+                            markdown_to_html._table_rows.append(cells)
+                        continue  # Skip normal paragraph processing for table rows
+                    else:
+                        # Not a table row - close table if we were in one
+                        if hasattr(markdown_to_html, '_in_table') and markdown_to_html._in_table:
+                            # Generate table HTML
+                            table_html = '<table style="border-collapse: collapse; width: 100%; margin: 15px 0; border: 1px solid #ddd;">'
+                            if hasattr(markdown_to_html, '_table_headers') and markdown_to_html._table_headers:
+                                table_html += '<thead><tr style="background-color: #4CAF50; color: white;">'
+                                for header in markdown_to_html._table_headers:
+                                    table_html += f'<th style="padding: 10px; border: 1px solid #ddd; text-align: left;"><b>{header}</b></th>'
+                                table_html += '</tr></thead>'
+                            table_html += '<tbody>'
+                            for row in markdown_to_html._table_rows:
+                                table_html += '<tr>'
+                                for cell in row:
+                                    table_html += f'<td style="padding: 8px; border: 1px solid #ddd;">{cell}</td>'
+                                table_html += '</tr>'
+                            table_html += '</tbody></table>'
+                            result_lines.append(table_html)
+                            delattr(markdown_to_html, '_in_table')
+                            delattr(markdown_to_html, '_table_rows')
+                            if hasattr(markdown_to_html, '_table_headers'):
+                                delattr(markdown_to_html, '_table_headers')
+                    
+                    # Process inline formatting
+                    para_text = line_stripped
+                    # Code blocks first (to avoid conflicts)
+                    para_text = re.sub(r'```(.*?)```', r'<pre style="background-color: #f5f5f5; padding: 10px; border-radius: 4px; border-left: 3px solid #4CAF50; margin: 10px 0;"><code>\1</code></pre>', para_text, flags=re.DOTALL)
+                    # Links [text](url)
+                    para_text = re.sub(r'\[([^\]]+)\]\(([^\)]+)\)', r'<a href="\2" style="color: #1976D2; text-decoration: none;"><b>\1</b></a>', para_text)
+                    # Bold
+                    para_text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', para_text)
+                    # Italic (avoid conflicts with bold)
+                    para_text = re.sub(r'(?<!\*)\*(?!\*)([^*]+?)(?<!\*)\*(?!\*)', r'<i>\1</i>', para_text)
+                    # Inline code
+                    para_text = re.sub(r'`([^`]+)`', r'<code style="background-color: #f5f5f5; padding: 2px 6px; border-radius: 3px; font-family: monospace;">\1</code>', para_text)
+                    
+                    result_lines.append(f'<p style="margin-bottom: 10px; line-height: 1.6;">{para_text}</p>')
+            
+            if in_list:
+                result_lines.append(f'</{list_type}>')
+            
+            # Close table if still open
+            if hasattr(markdown_to_html, '_in_table') and markdown_to_html._in_table:
+                table_html = '<table style="border-collapse: collapse; width: 100%; margin: 15px 0; border: 1px solid #ddd;">'
+                if hasattr(markdown_to_html, '_table_headers') and markdown_to_html._table_headers:
+                    table_html += '<thead><tr style="background-color: #4CAF50; color: white;">'
+                    for header in markdown_to_html._table_headers:
+                        table_html += f'<th style="padding: 10px; border: 1px solid #ddd; text-align: left;"><b>{header}</b></th>'
+                    table_html += '</tr></thead>'
+                table_html += '<tbody>'
+                for row in markdown_to_html._table_rows:
+                    table_html += '<tr>'
+                    for cell in row:
+                        table_html += f'<td style="padding: 8px; border: 1px solid #ddd;">{cell}</td>'
+                    table_html += '</tr>'
+                table_html += '</tbody></table>'
+                result_lines.append(table_html)
+            
+            html = '\n'.join(result_lines)
+            
+            # Wrap in HTML structure
+            return f"""
+            <html>
+            <head>
+                <style>
+                    body {{
+                        font-family: 'Segoe UI', 'Arial', sans-serif;
+                        font-size: 13px;
+                        line-height: 1.6;
+                        color: #212121;
+                        padding: 15px;
+                    }}
+                </style>
+            </head>
+            <body>
+                {html}
+            </body>
+            </html>
+            """
         
         # Read documentation files
         doc_dir = BUNDLE_ROOT
@@ -4749,50 +5136,84 @@ class MorphoMappingGUI(QMainWindow):
         # Installation Guide
         install_text = QTextEdit()
         install_text.setReadOnly(True)
+        install_text.setStyleSheet(text_edit_style)
         install_path = doc_dir / "INSTALLATION.md"
         if install_path.exists():
-            install_text.setPlainText(install_path.read_text(encoding='utf-8'))
+            markdown_content = install_path.read_text(encoding='utf-8')
+            html_content = markdown_to_html(markdown_content)
+            install_text.setHtml(html_content)
         else:
             install_text.setPlainText("Installation guide not found.")
-        tabs.addTab(install_text, "Installation")
+        tabs.addTab(install_text, "📦 Installation")
         
         # User Guide
         user_guide_text = QTextEdit()
         user_guide_text.setReadOnly(True)
+        user_guide_text.setStyleSheet(text_edit_style)
         user_guide_path = doc_dir / "USER_GUIDE.md"
         if user_guide_path.exists():
-            user_guide_text.setPlainText(user_guide_path.read_text(encoding='utf-8'))
+            markdown_content = user_guide_path.read_text(encoding='utf-8')
+            html_content = markdown_to_html(markdown_content)
+            user_guide_text.setHtml(html_content)
         else:
             user_guide_text.setPlainText("User guide not found.")
-        tabs.addTab(user_guide_text, "User Guide")
+        tabs.addTab(user_guide_text, "📖 User Guide")
         
         # README
         readme_text = QTextEdit()
         readme_text.setReadOnly(True)
+        readme_text.setStyleSheet(text_edit_style)
         readme_path = doc_dir / "README.md"
         if readme_path.exists():
-            readme_text.setPlainText(readme_path.read_text(encoding='utf-8'))
+            markdown_content = readme_path.read_text(encoding='utf-8')
+            html_content = markdown_to_html(markdown_content)
+            readme_text.setHtml(html_content)
         else:
             readme_text.setPlainText("README not found.")
-        tabs.addTab(readme_text, "Overview")
+        tabs.addTab(readme_text, "📋 Overview")
         
         # Documentation Index
         index_text = QTextEdit()
         index_text.setReadOnly(True)
+        index_text.setStyleSheet(text_edit_style)
         index_path = doc_dir / "DOCUMENTATION_INDEX.md"
         if index_path.exists():
-            index_text.setPlainText(index_path.read_text(encoding='utf-8'))
+            markdown_content = index_path.read_text(encoding='utf-8')
+            html_content = markdown_to_html(markdown_content)
+            index_text.setHtml(html_content)
         else:
             index_text.setPlainText("Documentation index not found.")
-        tabs.addTab(index_text, "Index")
+        tabs.addTab(index_text, "📑 Index")
         
         layout.addWidget(tabs)
         
+        # Button layout
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
         # Close button
         close_btn = QPushButton("Close")
-        close_btn.setStyleSheet("background-color: #1976D2; color: white; padding: 8px;")
+        close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1976D2;
+                color: white;
+                padding: 10px 25px;
+                font-size: 13px;
+                font-weight: bold;
+                border: none;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #1565C0;
+            }
+            QPushButton:pressed {
+                background-color: #0D47A1;
+            }
+        """)
         close_btn.clicked.connect(dialog.accept)
-        layout.addWidget(close_btn)
+        button_layout.addWidget(close_btn)
+        
+        layout.addLayout(button_layout)
         
         dialog.exec()
 

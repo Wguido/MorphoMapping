@@ -4,8 +4,9 @@
 # Usage: Rscript create_heatmap.R <input_csv> <output_png> <n_features> <n_clusters>
 
 suppressMessages({
-  library(pheatmap)
+  library(ComplexHeatmap)
   library(RColorBrewer)
+  library(circlize)
 })
 
 args <- commandArgs(trailingOnly = TRUE)
@@ -22,53 +23,93 @@ n_clusters <- as.integer(args[4])
 # Read data
 heatmap_data <- read.csv(input_csv, row.names = 1, check.names = FALSE)
 
-# Calculate font sizes based on number of features
+# Calculate cell height in mm (for ComplexHeatmap)
+# Scale based on number of features: more features = smaller cells
 if (n_features <= 20) {
-  y_fontsize <- 28
+  cell_height_mm <- 8
 } else if (n_features <= 50) {
-  y_fontsize <- 24
+  cell_height_mm <- 6
 } else if (n_features <= 100) {
-  y_fontsize <- 20
+  cell_height_mm <- 4
 } else {
-  y_fontsize <- 16
+  cell_height_mm <- max(3, 600 / n_features)  # Scale inversely, minimum 3mm
 }
 
-# Calculate figure size
-fig_width <- max(14, n_clusters * 1.5)
-fig_height <- max(12, n_features * 0.3)
+# Font size = 90% of cell height (10% smaller)
+# Convert mm to points: 1mm ≈ 2.83465 points
+y_fontsize <- round(cell_height_mm * 2.83465 * 0.9)
+y_fontsize <- max(8, min(20, y_fontsize))  # Clamp between 8 and 20
 
-# Create heatmap with pheatmap
-png(output_png, width = fig_width * 100, height = fig_height * 100, res = 300)
+# Calculate figure dimensions in mm
+# Width: heatmap body + row dendrogram + labels + margins
+base_width_mm <- max(200, n_clusters * 12)  # Base width for heatmap body
+dendro_width_mm <- 50  # Width for row dendrogram (left)
+label_width_mm <- 120  # Width for feature labels on right
+margin_width_mm <- 50  # Left/right margins
+fig_width_mm <- base_width_mm + dendro_width_mm + label_width_mm + margin_width_mm
 
-pheatmap(
-  heatmap_data,
-  color = colorRampPalette(rev(brewer.pal(n = 11, name = "RdYlBu")))(100),
-  cluster_rows = TRUE,  # Cluster features (Y-axis)
-  cluster_cols = TRUE,  # Cluster clusters (X-axis)
-  clustering_method = "ward.D2",
+# Height: heatmap body + column dendrogram + title + legend + margins
+base_height_mm <- n_features * cell_height_mm
+dendro_height_mm <- 40  # Height for column dendrogram (top)
+title_height_mm <- 20  # Height for title
+legend_height_mm <- 50  # Height for legend at bottom
+margin_height_mm <- 50  # Top/bottom margins
+fig_height_mm <- base_height_mm + dendro_height_mm + title_height_mm + legend_height_mm + margin_height_mm
+
+# Create PNG with proper dimensions (convert mm to pixels at 300 DPI)
+png(output_png, width = fig_width_mm * 300 / 25.4, height = fig_height_mm * 300 / 25.4, res = 300, units = "px")
+
+# Create color mapping
+# Use 100 breaks to match 100 colors
+col_fun <- colorRamp2(breaks = seq(-3, 3, length.out = 100), 
+                      colors = colorRampPalette(rev(brewer.pal(n = 11, name = "RdYlBu")))(100))
+
+# Create heatmap with ComplexHeatmap
+ht <- Heatmap(
+  as.matrix(heatmap_data),
+  name = "Z-score",
+  col = col_fun,
+  cluster_rows = TRUE,
+  cluster_columns = TRUE,
+  clustering_method_rows = "ward.D2",
+  clustering_method_columns = "ward.D2",
   clustering_distance_rows = "euclidean",
-  clustering_distance_cols = "euclidean",
-  show_rownames = if (n_features <= 100) TRUE else FALSE,
-  show_colnames = TRUE,
-  fontsize_row = y_fontsize,
-  fontsize_col = 18,
-  fontsize = 10,
-  fontsize_number = 8,
-  angle_col = 0,  # Horizontal labels
-  labels_row = rownames(heatmap_data),
-  labels_col = colnames(heatmap_data),
-  main = paste0("Cluster-Feature Heatmap (Row-wise Z-score)\n", 
-                n_features, " Features × ", n_clusters, " Clusters"),
-  border_color = "gray",
-  cellwidth = if (n_clusters <= 20) 20 else NA,
-  cellheight = if (n_features <= 50) 20 else NA,
-  legend = TRUE,
-  legend_breaks = c(-3, -2, -1, 0, 1, 2, 3),
-  legend_labels = c("-3", "-2", "-1", "0", "1", "2", "3"),
-  breaks = seq(-3, 3, length.out = 101)
+  clustering_distance_columns = "euclidean",
+  row_names_gp = gpar(fontsize = y_fontsize),
+  column_names_gp = gpar(fontsize = 16),
+  column_names_rot = 0,  # Column names upright (not rotated)
+  row_names_side = "right",  # Show row names on the right
+  row_dend_side = "left",  # Show row dendrogram on the left
+  column_dend_side = "top",  # Show column dendrogram on top
+  row_dend_width = unit(dendro_width_mm, "mm"),
+  column_dend_height = unit(dendro_height_mm, "mm"),
+  row_names_max_width = unit(label_width_mm, "mm"),
+  heatmap_legend_param = list(
+    title = "Z-score",
+    title_position = "topcenter",
+    legend_direction = "horizontal",
+    legend_width = unit(8, "cm"),
+    at = c(-3, -2, -1, 0, 1, 2, 3),
+    labels = c("-3", "-2", "-1", "0", "1", "2", "3")
+  ),
+  cell_fun = function(j, i, x, y, width, height, fill) {
+    # Optional: add borders
+    grid.rect(x = x, y = y, width = width, height = height, 
+              gp = gpar(fill = fill, col = "gray", lwd = 0.5))
+  }
+)
+
+# Draw heatmap
+draw(
+  ht,
+  column_title = paste0("Cluster-Feature Heatmap (Row-wise Z-score)\n", 
+                         n_features, " Features × ", n_clusters, " Clusters"),
+  column_title_gp = gpar(fontsize = 14, fontface = "bold"),
+  heatmap_legend_side = "bottom",
+  annotation_legend_side = "bottom",
+  padding = unit(c(margin_height_mm, margin_width_mm, legend_height_mm, margin_width_mm), "mm")
 )
 
 dev.off()
 
 message("Heatmap saved to: ", output_png)
-

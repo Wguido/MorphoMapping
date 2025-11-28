@@ -64,9 +64,13 @@ def run_dimensionality_reduction(
             continue
         
         # Filter by population if selected
+        # NEW BEHAVIOR: If population not found in a file, use all events from that file
+        # Only filter files that have the population
         if population:
             if population not in df.columns:
+                # Population not found - use all events (don't skip file)
                 skipped_files.append((fcs_file_name, [f"Population '{population}' not found - using all events"]))
+                # Continue with all events (df unchanged)
             else:
                 # Get population column as Series
                 pop_series = df[population]
@@ -165,8 +169,12 @@ def run_clustering(
         method_params = {}
     
     if method == "HDBSCAN":
-        min_cluster_size = method_params.get("min_cluster_size", max(50, int(len(coords) / 15)))
-        min_cluster_size = min(min_cluster_size, 500)  # Cap at 500
+        # Default: target ~10 clusters by using larger min_cluster_size
+        # If N cells, ~10 clusters means each cluster ~N/10
+        # Use max(500, N/10) to get fewer clusters, cap at 5000
+        default_min_size = max(500, int(len(coords) / 10))
+        min_cluster_size = method_params.get("min_cluster_size", default_min_size)
+        min_cluster_size = min(min_cluster_size, 5000)  # Cap at 5000
         min_samples = method_params.get("min_samples", 10)
         clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, min_samples=min_samples)
         cluster_labels = clusterer.fit_predict(coords)
