@@ -59,10 +59,19 @@ fig_height_mm <- base_height_mm + dendro_height_mm + title_height_mm + legend_he
 # Create PNG with proper dimensions (convert mm to pixels at 300 DPI)
 png(output_png, width = fig_width_mm * 300 / 25.4, height = fig_height_mm * 300 / 25.4, res = 300, units = "px")
 
-# Create color mapping
-# Use 100 breaks to match 100 colors
-col_fun <- colorRamp2(breaks = seq(-3, 3, length.out = 100), 
-                      colors = colorRampPalette(rev(brewer.pal(n = 11, name = "RdYlBu")))(100))
+# Calculate data range for color mapping
+data_min <- min(heatmap_data, na.rm = TRUE)
+data_max <- max(heatmap_data, na.rm = TRUE)
+# Extend range slightly for better visualization
+data_range <- data_max - data_min
+data_min <- data_min - 0.1 * data_range
+data_max <- data_max + 0.1 * data_range
+
+# Create color mapping with 100 breaks matching 100 colors
+n_breaks <- 100
+col_breaks <- seq(data_min, data_max, length.out = n_breaks)
+col_colors <- colorRampPalette(rev(brewer.pal(n = 11, name = "RdYlBu")))(n_breaks)
+col_fun <- colorRamp2(breaks = col_breaks, colors = col_colors)
 
 # Create heatmap with ComplexHeatmap
 ht <- Heatmap(

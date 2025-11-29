@@ -30,6 +30,7 @@ import pandas as pd
 from PySide6.QtCore import QThread, Signal, Qt, QTimer, QUrl
 from PySide6.QtGui import QPixmap, QFont, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
+    QRadioButton, QButtonGroup,
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QLineEdit, QFileDialog, QComboBox, QSlider,
     QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView,
@@ -368,36 +369,13 @@ class FeatureImportanceWorker(QThread):
     """Worker thread for calculating feature importance using MorphoMapping."""
     finished = Signal(bool, str)  # success, message
     
-    def __init__(self, embedding_df: pd.DataFrame, features: List[str], paths: Dict[str, Path], population: Optional[str]):
+    def __init__(self, embedding_df: pd.DataFrame, features: List[str], paths: Dict[str, Path], population: Optional[str], session_state: Dict):
         super().__init__()
         self.embedding_df = embedding_df
         self.features = features
         self.paths = paths
         self.population = population
-    
-    @staticmethod
-    def _plot_feature_importance_static(features_df: pd.DataFrame, output_path: str, title: str):
-        """Plot feature importance manually (static method to avoid multiprocessing)."""
-        import matplotlib.pyplot as plt
-        import numpy as np
-        
-        fig, ax = plt.subplots(figsize=(10, 6))
-        
-        # Sort by importance
-        features_df = features_df.sort_values('importance_normalized', ascending=True)
-        
-        # Create horizontal bar chart
-        y_pos = np.arange(len(features_df))
-        ax.barh(y_pos, features_df['importance_normalized'], color='steelblue')
-        ax.set_yticks(y_pos)
-        ax.set_yticklabels(features_df['index1'])
-        ax.set_xlabel('Normalized Importance', fontsize=12, fontweight='bold')
-        ax.set_title(f'Top 10 Features - {title}', fontsize=14, fontweight='bold')
-        ax.invert_yaxis()  # Highest importance at top
-        
-        plt.tight_layout()
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        plt.close(fig)
+        self.session_state = session_state
     
     def run(self):
         try:
@@ -988,15 +966,16 @@ class FeatureImportanceWorker(QThread):
                 plot_path_x = self.paths["results"] / "top10_features_x.png"
                 plot_path_y = self.paths["results"] / "top10_features_y.png"
                 
-                # Create plots manually instead of using mm.plot_feature_importance
-                # to avoid any multiprocessing issues
-                if not features_x.empty:
-                    self._plot_feature_importance_static(features_x, str(plot_path_x), "X Dimension")
+                # Store plot data in session_state for main thread (Matplotlib cannot be used in worker thread)
+                # The plots will be created in the main thread after finished signal
+                self.session_state["feature_importance_plot_data"] = {
+                    "features_x": features_x.to_dict('records'),
+                    "features_y": features_y.to_dict('records'),
+                    "plot_path_x": str(plot_path_x),
+                    "plot_path_y": str(plot_path_y)
+                }
                 
-                if not features_y.empty:
-                    self._plot_feature_importance_static(features_y, str(plot_path_y), "Y Dimension")
-                
-                self.finished.emit(True, f"✅ Top10 Features saved to:\n{csv_path}\n\nPlots saved to:\n{plot_path_x}\n{plot_path_y}")
+                self.finished.emit(True, f"✅ Top10 Features saved to:\n{csv_path}\n\nPlots will be saved to:\n{plot_path_x}\n{plot_path_y}")
             else:
                 self.finished.emit(False, "No feature importance data calculated.")
         except Exception as e:
@@ -2765,11 +2744,15 @@ class MorphoMappingGUI(QMainWindow):
             
             self.update_status()
             
-            # Force update of sections visibility
+            # Force update of sections visibility - show visualization immediately
             if hasattr(self, 'viz_cluster_section'):
                 if self.session_state.get("embedding_df") is not None:
                     self.viz_cluster_section.setVisible(True)
                     print(f"DEBUG: Combined visualization/clustering section set to visible after analysis")
+            elif hasattr(self, 'viz_section'):
+                if self.session_state.get("embedding_df") is not None:
+                    self.viz_section.setVisible(True)
+                    print(f"DEBUG: Visualization section set to visible after analysis")
             elif hasattr(self, 'clustering_section'):
                 if self.session_state.get("embedding_df") is not None:
                     self.clustering_section.setVisible(True)
@@ -2780,6 +2763,7 @@ class MorphoMappingGUI(QMainWindow):
                     self.top10_features_btn.setVisible(True)
                     print(f"DEBUG: Top10 Features button set to visible after analysis")
             
+            # Update visualization immediately - this will show the plot with default "group" coloring
             self.update_visualization()
             if hasattr(self, 'update_clustering_section'):
                 self.update_clustering_section()
@@ -2799,6 +2783,23 @@ class MorphoMappingGUI(QMainWindow):
         print(f"DEBUG on_top10_finished: success={success}, message={message}")
         
         if success:
+            # Create plots in main thread (Matplotlib cannot be used in worker thread)
+            plot_data = self.session_state.get("feature_importance_plot_data")
+            if plot_data:
+                try:
+                    features_x_df = pd.DataFrame(plot_data["features_x"])
+                    features_y_df = pd.DataFrame(plot_data["features_y"])
+                    
+                    if not features_x_df.empty:
+                        self._plot_feature_importance(features_x_df, plot_data["plot_path_x"], "X Dimension")
+                    if not features_y_df.empty:
+                        self._plot_feature_importance(features_y_df, plot_data["plot_path_y"], "Y Dimension")
+                    
+                    # Clean up
+                    del self.session_state["feature_importance_plot_data"]
+                except Exception as e:
+                    print(f"Warning: Could not create feature importance plots: {e}")
+            
             QMessageBox.information(self, "Success", message)
         else:
             # Show detailed error message
@@ -2848,8 +2849,27 @@ class MorphoMappingGUI(QMainWindow):
         
         color_layout = QHBoxLayout()
         color_layout.addWidget(QLabel("Color by:"))
+        
+        # Radio buttons for Metadata vs Feature
+        self.color_type_group = QButtonGroup()
+        self.color_metadata_radio = QRadioButton("Metadata")
+        self.color_metadata_radio.setChecked(True)
+        self.color_feature_radio = QRadioButton("Feature")
+        self.color_type_group.addButton(self.color_metadata_radio, 0)
+        self.color_type_group.addButton(self.color_feature_radio, 1)
+        color_layout.addWidget(self.color_metadata_radio)
+        color_layout.addWidget(self.color_feature_radio)
+        
         self.color_by_combo = QComboBox()
         color_layout.addWidget(self.color_by_combo, 1)
+        
+        # Connect radio buttons to update combo box
+        # Use buttonClicked signal from QButtonGroup to ensure it fires when selection changes
+        self.color_type_group.buttonClicked.connect(self.update_color_by_options)
+        # Also connect individual toggled signals as backup
+        self.color_metadata_radio.toggled.connect(self.update_color_by_options)
+        self.color_feature_radio.toggled.connect(self.update_color_by_options)
+        
         viz_controls.addLayout(color_layout)
         
         # Axis limits (shared for both plots)
@@ -2971,6 +2991,10 @@ class MorphoMappingGUI(QMainWindow):
         heatmap_btn.setStyleSheet("background-color: #E91E63; color: white; padding: 3px;")
         heatmap_btn.clicked.connect(self.export_cluster_heatmap)
         analysis_btn_layout.addWidget(heatmap_btn)
+        cluster_cells_btn = QPushButton("📋 Export Cluster Cells")
+        cluster_cells_btn.setStyleSheet("background-color: #9C27B0; color: white; padding: 3px;")
+        cluster_cells_btn.clicked.connect(self.export_cluster_cells)
+        analysis_btn_layout.addWidget(cluster_cells_btn)
         cluster_controls.addLayout(analysis_btn_layout)
         
         # Add both control groups to top row
@@ -2984,6 +3008,13 @@ class MorphoMappingGUI(QMainWindow):
         # Left: Visualization plot
         viz_group = QGroupBox("Dimensionality Reduction Plot")
         viz_layout = QVBoxLayout()
+        
+        # Title label for the plot
+        self.plot_title_label = QLabel("")
+        self.plot_title_label.setAlignment(Qt.AlignCenter)
+        self.plot_title_label.setStyleSheet("font-size: 14px; font-weight: bold; padding: 5px;")
+        viz_layout.addWidget(self.plot_title_label)
+        
         self.plot_label = QLabel()
         self.plot_label.setAlignment(Qt.AlignCenter)
         self.plot_label.setMinimumHeight(400)
@@ -3052,7 +3083,26 @@ class MorphoMappingGUI(QMainWindow):
         # Color by selection and export buttons
         top_layout = QHBoxLayout()
         top_layout.addWidget(QLabel("Color by:"))
-        self.color_by_combo = QComboBox()
+        
+        # Radio buttons for Metadata vs Feature
+        if not hasattr(self, 'color_type_group'):
+            self.color_type_group = QButtonGroup()
+            self.color_metadata_radio = QRadioButton("Metadata")
+            self.color_metadata_radio.setChecked(True)
+            self.color_feature_radio = QRadioButton("Feature")
+            self.color_type_group.addButton(self.color_metadata_radio, 0)
+            self.color_type_group.addButton(self.color_feature_radio, 1)
+            # Use buttonClicked signal from QButtonGroup
+            self.color_type_group.buttonClicked.connect(self.update_color_by_options)
+            # Also connect individual toggled signals as backup
+            self.color_metadata_radio.toggled.connect(self.update_color_by_options)
+            self.color_feature_radio.toggled.connect(self.update_color_by_options)
+        
+        top_layout.addWidget(self.color_metadata_radio)
+        top_layout.addWidget(self.color_feature_radio)
+        
+        if not hasattr(self, 'color_by_combo'):
+            self.color_by_combo = QComboBox()
         top_layout.addWidget(self.color_by_combo, 1)
         
         # Export buttons
@@ -3146,36 +3196,292 @@ class MorphoMappingGUI(QMainWindow):
                 self.viz_section.setVisible(False)
             return
         
+        # Make section visible first
         if hasattr(self, 'viz_cluster_section'):
             self.viz_cluster_section.setVisible(True)
+            print("DEBUG update_visualization: viz_cluster_section set to visible")
         elif hasattr(self, 'viz_section'):
             self.viz_section.setVisible(True)
+            print("DEBUG update_visualization: viz_section set to visible")
+        
+        # Process events to ensure UI is updated before drawing plot
+        QApplication.processEvents()
         
         embedding_df = self.session_state["embedding_df"]
         method = self.session_state.get("stored_dim_reduction_method", "DensMAP")
         x_label, y_label = get_axis_labels(method)
         
-        # Update color by combo
-        self.color_by_combo.clear()
-        color_options = ["sample_id"] + [c for c in embedding_df.columns if c not in ["x", "y", "sample_id", "cell_index", "cluster", "cluster_numeric", "highlighted"]]
-        self.color_by_combo.addItems(color_options)
+        # Ensure Metadata radio is checked by default FIRST (before connecting signals)
+        if hasattr(self, 'color_metadata_radio'):
+            # Temporarily disconnect to avoid triggering update during initialization
+            try:
+                self.color_metadata_radio.toggled.disconnect()
+            except:
+                pass
+            if not self.color_metadata_radio.isChecked():
+                self.color_metadata_radio.setChecked(True)
+                print("DEBUG update_visualization: Set Metadata radio to checked")
+        else:
+            print("DEBUG update_visualization: WARNING - color_metadata_radio not found!")
+        
+        # Update color by combo based on current selection - do this BEFORE connecting signals
+        # This ensures metadata options are immediately available
+        print("DEBUG update_visualization: Calling update_color_by_options() to populate dropdown")
+        self.update_color_by_options()
+        
+        # NOW connect radio buttons to update combo box
+        if hasattr(self, 'color_type_group'):
+            try:
+                self.color_type_group.buttonClicked.disconnect()
+            except:
+                pass
+            self.color_type_group.buttonClicked.connect(self.update_color_by_options)
+        if hasattr(self, 'color_metadata_radio'):
+            try:
+                self.color_metadata_radio.toggled.disconnect()
+            except:
+                pass
+            self.color_metadata_radio.toggled.connect(self.update_color_by_options)
+        if hasattr(self, 'color_feature_radio'):
+            try:
+                self.color_feature_radio.toggled.disconnect()
+            except:
+                pass
+            self.color_feature_radio.toggled.connect(self.update_color_by_options)
         
         # Disconnect previous connection if it exists
-        # Use a flag to track if we need to disconnect
         try:
-            # Try to disconnect the specific slot
-            self.color_by_combo.currentTextChanged.disconnect(self.redraw_plot)
+            self.color_by_combo.currentTextChanged.disconnect()
         except (TypeError, RuntimeError, SystemError):
-            # No previous connection - that's fine
             pass
         
-        # Connect the signal
-        self.color_by_combo.currentTextChanged.connect(self.redraw_plot)
+        # Connect signal with immediate callback (no timer delay for user interactions)
+        def on_color_changed(text):
+            print(f"DEBUG: Color changed to: {text}, triggering immediate redraw")
+            # Force immediate redraw without any delay
+            self.redraw_plot()
+            # Also force UI update
+            if hasattr(self, 'plot_label') and self.plot_label is not None:
+                self.plot_label.update()
+                self.plot_label.repaint()
+        
+        self.color_by_combo.currentTextChanged.connect(on_color_changed)
         
         # Set initial selection and trigger plot
         if self.color_by_combo.count() > 0:
-            self.color_by_combo.setCurrentIndex(0)
-        self.redraw_plot()
+            # Try to set "group" as default, otherwise use first item
+            group_idx = -1
+            for i in range(self.color_by_combo.count()):
+                if self.color_by_combo.itemText(i) == "group":
+                    group_idx = i
+                    break
+            if group_idx >= 0:
+                self.color_by_combo.setCurrentIndex(group_idx)
+                print(f"DEBUG update_visualization: Set default to 'group' (index {group_idx})")
+            else:
+                self.color_by_combo.setCurrentIndex(0)
+                print(f"DEBUG update_visualization: Set default to first item: {self.color_by_combo.itemText(0)}")
+            
+            # CRITICAL: Force redraw plot immediately - don't rely on signal
+            # The signal might not fire if the index is set programmatically
+            print("DEBUG update_visualization: Forcing immediate plot redraw")
+            current_text = self.color_by_combo.currentText()
+            if current_text:
+                print(f"DEBUG update_visualization: Current selection: {current_text}, triggering redraw")
+                # Call redraw directly AND emit signal
+                self.redraw_plot()
+                # Also emit signal to ensure any connected handlers run
+                self.color_by_combo.currentTextChanged.emit(current_text)
+            else:
+                # Even if no text, try to draw
+                self.redraw_plot()
+        else:
+            print("DEBUG update_visualization: WARNING - color_by_combo is empty!")
+            # Even if empty, try to draw a basic plot
+            if self.session_state.get("embedding_df") is not None:
+                print("DEBUG update_visualization: Drawing basic plot without color selection")
+                QTimer.singleShot(0, self.redraw_plot)  # Execute in next event loop cycle
+    
+    def update_color_by_options(self):
+        """Update color by combo box based on Metadata/Feature selection."""
+        if not hasattr(self, 'color_by_combo') or self.color_by_combo is None:
+            print("DEBUG update_color_by_options: color_by_combo not found")
+            return
+        
+        self.color_by_combo.clear()
+        
+        if hasattr(self, 'color_metadata_radio') and self.color_metadata_radio.isChecked():
+            # Show metadata columns
+            print("DEBUG update_color_by_options: Metadata selected")
+            if self.session_state.get("embedding_df") is not None:
+                embedding_df = self.session_state["embedding_df"]
+                # Build color options with "group" as first option if available
+                color_options = []
+                if "group" in embedding_df.columns:
+                    color_options.append("group")
+                if "sample_id" not in color_options:
+                    color_options.append("sample_id")
+                # Add other metadata columns
+                other_cols = [c for c in embedding_df.columns if c not in ["x", "y", "sample_id", "cell_index", "cluster", "cluster_numeric", "highlighted", "group"]]
+                color_options.extend(other_cols)
+                self.color_by_combo.addItems(color_options)
+                print(f"DEBUG update_color_by_options: Added {len(color_options)} metadata options")
+            else:
+                print("DEBUG update_color_by_options: No embedding_df available")
+        elif hasattr(self, 'color_feature_radio') and self.color_feature_radio.isChecked():
+            # Show features
+            print("DEBUG update_color_by_options: Feature selected")
+            features = self.session_state.get("features", [])
+            print(f"DEBUG update_color_by_options: Found {len(features)} features in session_state")
+            
+            # If no features in session_state, try to load from CSV files
+            if not features:
+                print("DEBUG update_color_by_options: No features in session_state, trying to load from CSV files...")
+                try:
+                    project_dir = safe_str(self.session_state.get("project_dir", PROJECT_ROOT))
+                    run_id = safe_str(self.session_state["run_id"])
+                    paths = get_run_paths(safe_path(project_dir), run_id)
+                    cache_dir = paths["csv_cache"]
+                    
+                    # Load features from first available CSV file
+                    csv_files = sorted(cache_dir.glob("*.csv"))
+                    if csv_files:
+                        df = pd.read_csv(csv_files[0], nrows=0)  # Read only headers
+                        # Exclude non-feature columns
+                        exclude_cols = ["sample_id", "cell_index", "x", "y", "cluster", "cluster_numeric", "highlighted"]
+                        features = [c for c in df.columns if c not in exclude_cols]
+                        print(f"DEBUG update_color_by_options: Loaded {len(features)} features from {csv_files[0].name}")
+                except Exception as e:
+                    print(f"DEBUG update_color_by_options: Error loading features from CSV: {e}")
+            
+            if features:
+                self.color_by_combo.addItems(features)
+                print(f"DEBUG update_color_by_options: Added {len(features)} features to combo")
+            else:
+                print("DEBUG update_color_by_options: No features available")
+                print(f"DEBUG update_color_by_options: session_state keys: {list(self.session_state.keys())}")
+        else:
+            print("DEBUG update_color_by_options: Neither radio button checked or not found")
+            print(f"DEBUG update_color_by_options: has color_metadata_radio: {hasattr(self, 'color_metadata_radio')}")
+            print(f"DEBUG update_color_by_options: has color_feature_radio: {hasattr(self, 'color_feature_radio')}")
+            if hasattr(self, 'color_metadata_radio'):
+                print(f"DEBUG update_color_by_options: metadata_radio checked: {self.color_metadata_radio.isChecked()}")
+            if hasattr(self, 'color_feature_radio'):
+                print(f"DEBUG update_color_by_options: feature_radio checked: {self.color_feature_radio.isChecked()}")
+    
+    def _load_feature_values(self, feature_name: str, embedding_df: pd.DataFrame) -> Optional[pd.Series]:
+        """Load feature values for a specific feature and merge with embedding_df."""
+        try:
+            print(f"DEBUG _load_feature_values: Loading feature '{feature_name}'")
+            # Get paths
+            project_dir = safe_str(self.session_state.get("project_dir", PROJECT_ROOT))
+            run_id = safe_str(self.session_state["run_id"])
+            paths = get_run_paths(safe_path(project_dir), run_id)
+            cache_dir = paths["csv_cache"]
+            
+            print(f"DEBUG _load_feature_values: cache_dir={cache_dir}, exists={cache_dir.exists()}")
+            
+            # Get sample IDs from embedding
+            sample_ids = embedding_df["sample_id"].astype(str).unique()
+            print(f"DEBUG _load_feature_values: Found {len(sample_ids)} sample_ids: {sample_ids[:5]}")
+            
+            # Collect feature data for all samples
+            all_feature_data = []
+            # Try to find CSV files directly by sample_id
+            csv_files = sorted(cache_dir.glob("*.csv"))
+            print(f"DEBUG _load_feature_values: Found {len(csv_files)} CSV files in cache")
+            
+            for csv_path in csv_files:
+                csv_stem = str(csv_path.stem)
+                if csv_stem not in sample_ids:
+                    print(f"DEBUG _load_feature_values: Skipping {csv_stem} (not in sample_ids)")
+                    continue
+                
+                print(f"DEBUG _load_feature_values: Processing {csv_stem}")
+                
+                df = pd.read_csv(csv_path)
+                print(f"DEBUG _load_feature_values: Loaded {len(df)} rows from {csv_stem}.csv, columns: {len(df.columns)}")
+                
+                # Filter by population if selected
+                population = self.session_state.get("selected_population")
+                if population and population in df.columns:
+                    pop_series = df[population]
+                    if isinstance(pop_series, pd.DataFrame):
+                        pop_series = pop_series.iloc[:, 0]
+                    pop_array = np.asarray(pop_series)
+                    if pop_series.dtype == bool or str(pop_series.dtype) == 'bool':
+                        mask = pop_array == True
+                    else:
+                        mask = pop_array == 1
+                    df = df[mask]
+                    print(f"DEBUG _load_feature_values: After population filter: {len(df)} rows")
+                
+                # Check if feature exists
+                if feature_name not in df.columns:
+                    print(f"DEBUG _load_feature_values: Feature '{feature_name}' not in columns: {df.columns[:10].tolist()}...")
+                    continue
+                
+                print(f"DEBUG _load_feature_values: Feature '{feature_name}' found in {csv_stem}")
+                
+                # Add sample_id and cell_index
+                df["sample_id"] = csv_stem
+                df = df.reset_index(drop=True)
+                df["cell_index"] = df.groupby("sample_id").cumcount()
+                
+                # Select only needed columns
+                df_subset = df[["sample_id", "cell_index", feature_name]].copy()
+                all_feature_data.append(df_subset)
+                print(f"DEBUG _load_feature_values: Added {len(df_subset)} rows for {csv_stem}")
+            
+            if not all_feature_data:
+                print("DEBUG _load_feature_values: No feature data collected")
+                return None
+            
+            print(f"DEBUG _load_feature_values: Collected data from {len(all_feature_data)} samples")
+            
+            # Combine all feature data
+            feature_data = pd.concat(all_feature_data, ignore_index=True)
+            print(f"DEBUG _load_feature_values: Combined feature_data shape: {feature_data.shape}")
+            
+            # Merge with embedding_df - need to ensure proper alignment
+            embedding_df_merge = embedding_df[["sample_id", "cell_index"]].copy()
+            embedding_df_merge = embedding_df_merge.reset_index(drop=True)
+            print(f"DEBUG _load_feature_values: embedding_df_merge shape: {embedding_df_merge.shape}")
+            print(f"DEBUG _load_feature_values: feature_data shape: {feature_data.shape}")
+            
+            # Merge on sample_id and cell_index
+            merged = embedding_df_merge.merge(
+                feature_data,
+                on=["sample_id", "cell_index"],
+                how="left"
+            )
+            print(f"DEBUG _load_feature_values: Merged shape: {merged.shape}, matched: {merged[feature_name].notna().sum()} out of {len(merged)}")
+            
+            # Ensure the result has the same length as embedding_df
+            if len(merged) != len(embedding_df):
+                print(f"DEBUG _load_feature_values: WARNING - Length mismatch! merged={len(merged)}, embedding_df={len(embedding_df)}")
+                # Reindex to match embedding_df
+                merged = merged.set_index(embedding_df_merge.index)
+            
+            # Return feature values aligned with embedding_df
+            if feature_name in merged.columns:
+                result = merged[feature_name]
+                # Ensure result has same index as embedding_df
+                if len(result) != len(embedding_df):
+                    print(f"DEBUG _load_feature_values: WARNING - Result length mismatch! result={len(result)}, embedding_df={len(embedding_df)}")
+                    # Try to align by index
+                    result = result.reindex(embedding_df.index, fill_value=np.nan)
+                print(f"DEBUG _load_feature_values: Returning {len(result)} values, {result.notna().sum()} non-NaN")
+                return result
+            else:
+                print(f"DEBUG _load_feature_values: Feature '{feature_name}' not in merged columns: {merged.columns.tolist()[:10]}")
+                return None
+                
+        except Exception as e:
+            print(f"Error loading feature values for {feature_name}: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
     
     def redraw_plot(self):
         """Redraw the plot with current color selection."""
@@ -3187,11 +3493,69 @@ class MorphoMappingGUI(QMainWindow):
         method = self.session_state.get("stored_dim_reduction_method", "DensMAP")
         x_label, y_label = get_axis_labels(method)
         
-        # Create plot
-        fig, ax = plt.subplots(figsize=(10, 8))
+        # Check if coloring by feature or metadata
+        is_feature_coloring = hasattr(self, 'color_feature_radio') and self.color_feature_radio.isChecked()
+        
+        # Create plot - use smaller size so both plots fit side by side
+        fig, ax = plt.subplots(figsize=(7, 6))
         
         unique_vals = []
-        if color_by in embedding_df.columns:
+        
+        if is_feature_coloring:
+            # Feature-based coloring (Heatmap style)
+            print(f"DEBUG redraw_plot: Feature coloring selected, feature={color_by}")
+            feature_values = self._load_feature_values(color_by, embedding_df)
+            print(f"DEBUG redraw_plot: feature_values type={type(feature_values)}, length={len(feature_values) if feature_values is not None else 0}")
+            
+            if feature_values is not None and len(feature_values) > 0:
+                print(f"DEBUG redraw_plot: feature_values has {feature_values.notna().sum()} non-NaN values out of {len(feature_values)}")
+                if feature_values.notna().any():
+                    # Filter out NaN values
+                    valid_mask = feature_values.notna()
+                    valid_embedding = embedding_df[valid_mask].copy()
+                    valid_values = feature_values[valid_mask]
+                    
+                    print(f"DEBUG redraw_plot: Plotting {len(valid_embedding)} cells with feature values")
+                    print(f"DEBUG redraw_plot: Feature value range: [{valid_values.min():.2f}, {valid_values.max():.2f}]")
+                    
+                    if len(valid_embedding) > 0:
+                        # Use heatmap colormap (viridis for continuous values)
+                        # Ensure valid_values is a numpy array or list
+                        if isinstance(valid_values, pd.Series):
+                            valid_values_array = valid_values.values
+                        else:
+                            valid_values_array = valid_values
+                        
+                        scatter = ax.scatter(valid_embedding["x"].values, valid_embedding["y"].values, 
+                                           c=valid_values_array, 
+                                           cmap="viridis", 
+                                           alpha=0.6, 
+                                           s=10,
+                                           vmin=float(valid_values.min()),
+                                           vmax=float(valid_values.max()))
+                        
+                        # Add colorbar
+                        cbar = plt.colorbar(scatter, ax=ax)
+                        cbar.set_label(color_by, fontsize=12, fontweight='bold')
+                        
+                        # Plot NaN values in gray if any
+                        nan_mask = ~valid_mask
+                        if nan_mask.any():
+                            nan_embedding = embedding_df[nan_mask]
+                            ax.scatter(nan_embedding["x"].values, nan_embedding["y"].values, c="gray", alpha=0.3, s=10, label="N/A")
+                    else:
+                        print("DEBUG redraw_plot: No valid embedding after filtering")
+                        ax.scatter(embedding_df["x"], embedding_df["y"], alpha=0.6, s=10, c="blue")
+                else:
+                    print(f"DEBUG redraw_plot: All feature values are NaN")
+                    ax.scatter(embedding_df["x"], embedding_df["y"], alpha=0.6, s=10, c="blue")
+            else:
+                # Feature not found - plot without coloring
+                print(f"WARNING: Feature '{color_by}' not found or could not be loaded.")
+                print(f"DEBUG redraw_plot: feature_values is None or empty")
+                ax.scatter(embedding_df["x"], embedding_df["y"], alpha=0.6, s=10, c="blue")
+        elif color_by in embedding_df.columns:
+            # Metadata-based coloring (categorical)
             # Filter out NaN values for the color_by column
             valid_df = embedding_df[embedding_df[color_by].notna()].copy()
             if len(valid_df) > 0:
@@ -3229,7 +3593,14 @@ class MorphoMappingGUI(QMainWindow):
         
         ax.set_xlabel(x_label, fontsize=14, fontweight="bold")
         ax.set_ylabel(y_label, fontsize=14, fontweight="bold")
-        ax.set_title(f"{method} Visualization", fontsize=16, fontweight="bold")
+        # Title will be shown in the label above the plot, not in the plot itself
+        
+        # Update title label above the plot
+        color_type = "Feature" if is_feature_coloring else "Metadata"
+        title_text = f"{method} colored by {color_type.lower()}: {color_by}"
+        if hasattr(self, 'plot_title_label') and self.plot_title_label is not None:
+            self.plot_title_label.setText(title_text)
+            print(f"DEBUG redraw_plot: Updated title to: {title_text}")
         
         # Apply axis limits if set
         axis_limits = self.session_state.get("axis_limits", {})
@@ -3254,7 +3625,21 @@ class MorphoMappingGUI(QMainWindow):
         buf.seek(0)
         pixmap = QPixmap()
         pixmap.loadFromData(buf.read())
-        self.plot_label.setPixmap(pixmap.scaled(self.plot_label.width(), self.plot_label.height(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        
+        # Check if plot_label exists and has valid size
+        if hasattr(self, 'plot_label') and self.plot_label is not None:
+            # Get label size, use minimum if size is 0
+            label_width = max(self.plot_label.width(), 800) if self.plot_label.width() > 0 else 800
+            label_height = max(self.plot_label.height(), 600) if self.plot_label.height() > 0 else 600
+            scaled_pixmap = pixmap.scaled(label_width, label_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.plot_label.setPixmap(scaled_pixmap)
+            # Force immediate update of the label
+            self.plot_label.update()
+            self.plot_label.repaint()
+            print(f"DEBUG redraw_plot: Plot displayed in plot_label (size: {label_width}x{label_height})")
+        else:
+            print("DEBUG redraw_plot: WARNING - plot_label not found or None!")
+        
         plt.close(fig)
     
     def export_plot(self, format: str = "png"):
@@ -3280,10 +3665,47 @@ class MorphoMappingGUI(QMainWindow):
         embedding_df = self.session_state["embedding_df"]
         x_label, y_label = get_axis_labels(method)
         
+        # Check if coloring by feature or metadata
+        is_feature_coloring = hasattr(self, 'color_feature_radio') and self.color_feature_radio.isChecked()
+        
         fig, ax = plt.subplots(figsize=(10, 8))
         
         unique_vals = []
-        if color_by in embedding_df.columns:
+        
+        if is_feature_coloring:
+            # Feature-based coloring (Heatmap style)
+            feature_values = self._load_feature_values(color_by, embedding_df)
+            
+            if feature_values is not None and len(feature_values) > 0 and feature_values.notna().any():
+                # Filter out NaN values
+                valid_mask = feature_values.notna()
+                valid_embedding = embedding_df[valid_mask].copy()
+                valid_values = feature_values[valid_mask]
+                
+                if len(valid_embedding) > 0:
+                    # Use heatmap colormap (viridis for continuous values)
+                    scatter = ax.scatter(valid_embedding["x"], valid_embedding["y"], 
+                                       c=valid_values, 
+                                       cmap="viridis", 
+                                       alpha=0.6, 
+                                       s=10,
+                                       vmin=valid_values.min(),
+                                       vmax=valid_values.max())
+                    
+                    # Add colorbar
+                    cbar = plt.colorbar(scatter, ax=ax)
+                    cbar.set_label(color_by, fontsize=12, fontweight='bold')
+                    
+                    # Plot NaN values in gray if any
+                    nan_mask = ~valid_mask
+                    if nan_mask.any():
+                        nan_embedding = embedding_df[nan_mask]
+                        ax.scatter(nan_embedding["x"], nan_embedding["y"], c="gray", alpha=0.3, s=10, label="N/A")
+                else:
+                    ax.scatter(embedding_df["x"], embedding_df["y"], alpha=0.6, s=10, c="blue")
+            else:
+                ax.scatter(embedding_df["x"], embedding_df["y"], alpha=0.6, s=10, c="blue")
+        elif color_by in embedding_df.columns:
             # Get the column as Series
             color_by_series = embedding_df[color_by]
             if isinstance(color_by_series, pd.DataFrame):
@@ -3373,7 +3795,7 @@ class MorphoMappingGUI(QMainWindow):
         QMessageBox.information(self, "Success", f"✅ Plot exported to:\n{file_path}")
     
     def apply_axis_limits(self):
-        """Apply axis limits to the plot."""
+        """Apply axis limits to both plots (visualization and cluster)."""
         try:
             limits = {}
             if self.x_min_input.text().strip():
@@ -3386,18 +3808,32 @@ class MorphoMappingGUI(QMainWindow):
                 limits["y_max"] = float(self.y_max_input.text().strip())
             
             self.session_state["axis_limits"] = limits
+            # Update both plots
             self.redraw_plot()
+            # Also update cluster plot if it exists
+            if hasattr(self, 'update_cluster_plot') and self.session_state.get("cluster_labels") is not None:
+                self.update_cluster_plot()
+                print("DEBUG apply_axis_limits: Updated both visualization and cluster plots")
+            else:
+                print("DEBUG apply_axis_limits: Updated visualization plot (cluster plot not available)")
         except ValueError:
             QMessageBox.warning(self, "Warning", "⚠️ Invalid number format. Please enter valid numbers.")
     
     def reset_axis_limits(self):
-        """Reset axis limits to automatic."""
+        """Reset axis limits to automatic for both plots."""
         self.session_state["axis_limits"] = {}
         self.x_min_input.clear()
         self.x_max_input.clear()
         self.y_min_input.clear()
         self.y_max_input.clear()
+        # Update both plots
         self.redraw_plot()
+        # Also update cluster plot if it exists
+        if hasattr(self, 'update_cluster_plot') and self.session_state.get("cluster_labels") is not None:
+            self.update_cluster_plot()
+            print("DEBUG reset_axis_limits: Reset limits for both visualization and cluster plots")
+        else:
+            print("DEBUG reset_axis_limits: Reset limits for visualization plot (cluster plot not available)")
     
     def download_top10_features(self):
         """Calculate and download Top10 Features for x and y dimensions in background."""
@@ -3420,7 +3856,8 @@ class MorphoMappingGUI(QMainWindow):
             embedding_df,
             features,
             paths,
-            self.session_state.get("selected_population")
+            self.session_state.get("selected_population"),
+            self.session_state
         )
         worker.finished.connect(lambda success, msg: self.on_top10_finished(success, msg, worker))
         self.active_workers.append(worker)
@@ -3588,6 +4025,11 @@ class MorphoMappingGUI(QMainWindow):
         heatmap_btn.setStyleSheet("background-color: #E91E63; color: white; padding: 5px;")
         heatmap_btn.clicked.connect(self.export_cluster_heatmap)
         analysis_btn_layout.addWidget(heatmap_btn)
+        
+        cluster_cells_btn = QPushButton("📋 Export Cluster Cells")
+        cluster_cells_btn.setStyleSheet("background-color: #9C27B0; color: white; padding: 5px;")
+        cluster_cells_btn.clicked.connect(self.export_cluster_cells)
+        analysis_btn_layout.addWidget(cluster_cells_btn)
         
         layout.addLayout(analysis_btn_layout)
         
@@ -4384,6 +4826,76 @@ class MorphoMappingGUI(QMainWindow):
             import traceback
             error_trace = traceback.format_exc()
             print(f"Error exporting top3 features: {e}\n{error_trace}")
+            QMessageBox.critical(self, "Error", f"❌ Error: {str(e)[:200]}")
+    
+    def export_cluster_cells(self):
+        """Export cell identifiers per cluster (max 100 cells per cluster)."""
+        if self.session_state.get("cluster_labels") is None or self.session_state.get("embedding_df") is None:
+            QMessageBox.warning(self, "Warning", "No cluster data available. Run clustering first.")
+            return
+        
+        try:
+            embedding_df = self.session_state["embedding_df"].copy()
+            cluster_labels = self.session_state["cluster_labels"]
+            embedding_df["cluster"] = cluster_labels
+            embedding_df["cluster"] = embedding_df["cluster"].astype(str)
+            embedding_df.loc[embedding_df["cluster"] == "-1", "cluster"] = "Noise"
+            
+            # Ensure cell_index exists
+            if "cell_index" not in embedding_df.columns:
+                embedding_df = embedding_df.reset_index(drop=True)
+                embedding_df["cell_index"] = embedding_df.groupby("sample_id").cumcount()
+            
+            # Get paths
+            project_dir = safe_str(self.session_state.get("project_dir", PROJECT_ROOT))
+            run_id = safe_str(self.session_state["run_id"])
+            paths = get_run_paths(safe_path(project_dir), run_id)
+            paths["results"].mkdir(parents=True, exist_ok=True)
+            
+            # Collect cells per cluster (max 100 per cluster)
+            max_cells_per_cluster = 100
+            cluster_cells_list = []
+            
+            # Get unique clusters (excluding noise if desired, but we'll include it)
+            clusters = sorted([c for c in embedding_df["cluster"].unique() if pd.notna(c)])
+            
+            for cluster in clusters:
+                cluster_data = embedding_df[embedding_df["cluster"] == cluster].copy()
+                
+                # Sample up to max_cells_per_cluster cells
+                if len(cluster_data) > max_cells_per_cluster:
+                    cluster_data = cluster_data.sample(n=max_cells_per_cluster, random_state=42)
+                
+                # Add to list
+                for idx, row in cluster_data.iterrows():
+                    cluster_cells_list.append({
+                        "Cluster": cluster,
+                        "Sample_ID": str(row["sample_id"]),
+                        "Cell_Index": int(row["cell_index"])
+                    })
+            
+            # Create DataFrame and save
+            cluster_cells_df = pd.DataFrame(cluster_cells_list)
+            output_path = paths["results"] / "cluster_cells.csv"
+            cluster_cells_df.to_csv(output_path, index=False)
+            
+            # Count cells per cluster for message
+            cells_per_cluster = cluster_cells_df.groupby("Cluster").size()
+            cluster_summary = "\n".join([f"  {cluster}: {count} cells" for cluster, count in cells_per_cluster.items()])
+            
+            QMessageBox.information(
+                self,
+                "Success",
+                f"✅ Cluster cells exported to:\n{output_path}\n\n"
+                f"Total cells exported: {len(cluster_cells_df)}\n"
+                f"Cells per cluster:\n{cluster_summary}\n\n"
+                f"Note: Maximum {max_cells_per_cluster} cells per cluster (or all if fewer)."
+            )
+            
+        except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
+            print(f"Error exporting cluster cells: {e}\n{error_trace}")
             QMessageBox.critical(self, "Error", f"❌ Error: {str(e)[:200]}")
     
     def export_cluster_heatmap(self):
