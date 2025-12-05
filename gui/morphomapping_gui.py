@@ -19,6 +19,7 @@ import json
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -35,7 +36,7 @@ from PySide6.QtWidgets import (
     QLabel, QPushButton, QLineEdit, QFileDialog, QComboBox, QSlider,
     QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView,
     QGroupBox, QMessageBox, QProgressBar, QTextEdit, QFrame,
-    QSizePolicy, QSpacerItem, QCheckBox, QDialog, QTabWidget
+    QSizePolicy, QSpacerItem, QCheckBox, QDialog, QTabWidget, QListWidget, QListWidgetItem
 )
 
 try:
@@ -78,6 +79,43 @@ def safe_path(path) -> Path:
     elif not isinstance(path, (str, Path)):
         path = safe_str(path)
     return Path(str(path))
+
+
+# ============================================================================
+# Drag and Drop Widget
+# ============================================================================
+
+class DropArea(QLabel):
+    """Custom widget for drag and drop of DAF files."""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        self.parent_window = parent
+    
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        """Handle drag enter event."""
+        if event.mimeData().hasUrls():
+            # Check if any URL is a .daf file
+            for url in event.mimeData().urls():
+                file_path = url.toLocalFile()
+                if file_path.endswith('.daf'):
+                    event.acceptProposedAction()
+                    return
+        event.ignore()
+    
+    def dropEvent(self, event: QDropEvent):
+        """Handle drop event for DAF files."""
+        files = []
+        for url in event.mimeData().urls():
+            file_path = url.toLocalFile()
+            if file_path.endswith('.daf'):
+                files.append(file_path)
+        
+        if files and self.parent_window:
+            self.parent_window.process_daf_files(files)
+        
+        event.acceptProposedAction()
 
 
 # ============================================================================
@@ -176,15 +214,18 @@ class AnalysisWorker(QThread):
             
             # Prepare metadata: ensure sample_id exists and matches embedding
             if not metadata_df.empty:
+                # Normalize file_name: remove .daf or .fcs extension if present
+                if "file_name" in metadata_df.columns:
+                    metadata_df["file_name"] = metadata_df["file_name"].astype(str).str.replace(r'\.(daf|fcs)$', '', regex=True)
+                
                 # If file_name exists but sample_id doesn't, create sample_id from file_name
                 if "file_name" in metadata_df.columns and "sample_id" not in metadata_df.columns:
-                    # Remove .fcs extension if present
-                    metadata_df["sample_id"] = metadata_df["file_name"].astype(str).str.replace(r'\.fcs$', '', regex=True)
+                    metadata_df["sample_id"] = metadata_df["file_name"].copy()
                     print(f"DEBUG: Created sample_id from file_name")
                 
-                # Also try matching by file_name (without .fcs extension)
+                # Create file_name_clean for matching (already normalized, so just copy)
                 if "file_name" in metadata_df.columns:
-                    metadata_df["file_name_clean"] = metadata_df["file_name"].astype(str).str.replace(r'\.fcs$', '', regex=True)
+                    metadata_df["file_name_clean"] = metadata_df["file_name"].copy()
                 else:
                     metadata_df["file_name_clean"] = None
             
@@ -1057,6 +1098,10 @@ class MorphoMappingGUI(QMainWindow):
         # Track active worker threads to ensure proper cleanup
         self.active_workers: List[QThread] = []
         
+        # Track conversion completion to show message only once
+        self._conversion_complete_shown = False
+        self._total_files_to_convert = 0
+        
         # Setup UI
         self.setup_ui()
         
@@ -1243,21 +1288,27 @@ class MorphoMappingGUI(QMainWindow):
         setup_layout.addWidget(QLabel("Project Directory:"))
         setup_layout.addWidget(project_dir_input)
         
-        run_id_input = QLineEdit()
-        run_id_input.setText(self.session_state["run_id"])
+        self.run_id_input = QLineEdit()
+        self.run_id_input.setText(self.session_state["run_id"])
         setup_layout.addWidget(QLabel("Run-ID:"))
-        setup_layout.addWidget(run_id_input)
+        setup_layout.addWidget(self.run_id_input)
         
         def update_project():
             self.session_state["project_dir"] = project_dir_input.text()
-            self.session_state["run_id"] = run_id_input.text()
-            QMessageBox.information(self, "Success", f"✅ Project set: {run_id_input.text()}")
+            self.session_state["run_id"] = self.run_id_input.text()
+            QMessageBox.information(self, "Success", f"✅ Project set: {self.run_id_input.text()}")
             self.update_status()
         
         set_btn = QPushButton("💾 Set Project")
         set_btn.clicked.connect(update_project)
         set_btn.setStyleSheet("background-color: #1976D2; color: white; padding: 8px;")
         setup_layout.addWidget(set_btn)
+        
+        # Load previous run button
+        load_run_btn = QPushButton("📂 Load Previous Run")
+        load_run_btn.clicked.connect(self.load_previous_run)
+        load_run_btn.setStyleSheet("background-color: #388E3C; color: white; padding: 8px;")
+        setup_layout.addWidget(load_run_btn)
         
         setup_group.setLayout(setup_layout)
         layout.addWidget(setup_group, 1)
@@ -1499,6 +1550,229 @@ class MorphoMappingGUI(QMainWindow):
         except Exception as e:
             print(f"Warning: Could not save run info: {e}")
     
+    def load_previous_run(self):
+        """Load a previous run from disk."""
+        try:
+            # Find all available runs
+            project_dir = safe_path(self.session_state.get("project_dir", PROJECT_ROOT))
+            bundle_runs_dir = project_dir / "bundle_runs"
+            
+            if not bundle_runs_dir.exists():
+                QMessageBox.warning(self, "No Runs Found", "No previous runs found. Please run an analysis first.")
+                return
+            
+            # Find all run directories
+            run_dirs = sorted([d for d in bundle_runs_dir.iterdir() if d.is_dir() and d.name.startswith("run_")], 
+                            reverse=True)  # Most recent first
+            
+            if not run_dirs:
+                QMessageBox.warning(self, "No Runs Found", "No previous runs found. Please run an analysis first.")
+                return
+            
+            # Create dialog to select run
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Load Previous Run")
+            dialog.setMinimumWidth(600)
+            layout = QVBoxLayout()
+            
+            layout.addWidget(QLabel("Select a run to load:"))
+            
+            # List widget with run information
+            list_widget = QListWidget()
+            list_widget.setMinimumHeight(300)
+            
+            for run_dir in run_dirs:
+                run_id = run_dir.name
+                info_path = run_dir / "run_info.json"
+                
+                # Try to load run info
+                run_info = {}
+                if info_path.exists():
+                    try:
+                        run_info = json.loads(info_path.read_text())
+                    except:
+                        pass
+                
+                # Create display text
+                timestamp = run_info.get("timestamp", "Unknown")
+                method = run_info.get("dimensionality_reduction", {}).get("method", "Unknown")
+                n_files = run_info.get("daf_files_count", 0)
+                has_clustering = "clustering" in run_info
+                
+                display_text = f"{run_id}\n"
+                display_text += f"  Method: {method} | Files: {n_files} | Clustering: {'Yes' if has_clustering else 'No'}\n"
+                display_text += f"  Date: {timestamp[:19] if len(timestamp) > 19 else timestamp}"
+                
+                item = QListWidgetItem(display_text)
+                item.setData(Qt.UserRole, run_id)
+                list_widget.addItem(item)
+            
+            layout.addWidget(list_widget)
+            
+            # Buttons
+            button_layout = QHBoxLayout()
+            load_btn = QPushButton("Load")
+            load_btn.setStyleSheet("background-color: #388E3C; color: white; padding: 5px;")
+            cancel_btn = QPushButton("Cancel")
+            cancel_btn.setStyleSheet("background-color: #757575; color: white; padding: 5px;")
+            
+            def on_load():
+                selected_items = list_widget.selectedItems()
+                if not selected_items:
+                    QMessageBox.warning(dialog, "No Selection", "Please select a run to load.")
+                    return
+                
+                selected_run_id = selected_items[0].data(Qt.UserRole)
+                dialog.accept()
+                self._load_run_data(selected_run_id)
+            
+            load_btn.clicked.connect(on_load)
+            cancel_btn.clicked.connect(dialog.reject)
+            
+            button_layout.addWidget(load_btn)
+            button_layout.addWidget(cancel_btn)
+            layout.addLayout(button_layout)
+            
+            dialog.setLayout(layout)
+            
+            if dialog.exec() == QDialog.Accepted:
+                # Already handled in on_load
+                pass
+                
+        except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
+            print(f"Error loading previous run: {e}\n{error_trace}")
+            QMessageBox.critical(self, "Error", f"❌ Error loading run: {str(e)[:200]}")
+    
+    def _load_run_data(self, run_id: str):
+        """Load run data from disk."""
+        try:
+            project_dir = safe_path(self.session_state.get("project_dir", PROJECT_ROOT))
+            paths = get_run_paths(project_dir, run_id)
+            
+            # Load run info
+            info_path = paths["base"] / "run_info.json"
+            if not info_path.exists():
+                QMessageBox.critical(self, "Error", f"Run info not found: {info_path}")
+                return
+            
+            run_info = json.loads(info_path.read_text())
+            
+            # Update session state with run info
+            self.session_state["run_id"] = run_id
+            self.session_state["project_dir"] = str(project_dir)
+            
+            # Load embedding
+            dim_reduction_info = run_info.get("dimensionality_reduction", {})
+            method = dim_reduction_info.get("method", "DensMAP")
+            method_name_map = {"DensMAP": "densmap", "UMAP": "umap", "t-SNE": "tsne"}
+            method_name = method_name_map.get(method, "densmap")
+            
+            embedding_path = paths["results"] / f"{method_name}_embedding.parquet"
+            if not embedding_path.exists():
+                QMessageBox.critical(self, "Error", f"Embedding file not found: {embedding_path}")
+                return
+            
+            # Try to read parquet, fallback to CSV if needed
+            try:
+                embedding_df = pd.read_parquet(embedding_path)
+            except Exception as e:
+                print(f"Warning: Could not read parquet, trying CSV: {e}")
+                # Fallback: try to find CSV version
+                csv_path = paths["results"] / f"{method_name}_embedding.csv"
+                if csv_path.exists():
+                    embedding_df = pd.read_csv(csv_path)
+                else:
+                    raise ValueError(f"Could not load embedding from {embedding_path}")
+            
+            print(f"DEBUG: Loaded embedding with {len(embedding_df)} cells")
+            
+            # Ensure cell_index exists (needed for cluster label matching)
+            if "cell_index" not in embedding_df.columns:
+                embedding_df["cell_index"] = range(len(embedding_df))
+                print("DEBUG: Added cell_index to embedding_df")
+            
+            # Load metadata if available
+            metadata_path = paths["base"] / "metadata" / "sample_sheet.csv"
+            metadata_df = pd.DataFrame()
+            if metadata_path.exists():
+                metadata_df = pd.read_csv(metadata_path)
+                print(f"DEBUG: Loaded metadata with {len(metadata_df)} samples")
+            
+            # Merge metadata with embedding
+            if not metadata_df.empty and "file_name" in metadata_df.columns:
+                # Create file_name_clean for matching
+                embedding_df["file_name_clean"] = embedding_df["sample_id"].astype(str)
+                metadata_df["file_name_clean"] = metadata_df["file_name"].astype(str)
+                
+                embedding_df = embedding_df.merge(
+                    metadata_df,
+                    on="file_name_clean",
+                    how="left",
+                    suffixes=("", "_meta")
+                )
+                # Clean up duplicate columns
+                if "sample_id_meta" in embedding_df.columns:
+                    embedding_df = embedding_df.drop(columns=["sample_id_meta"])
+            
+            # Load cluster labels if available
+            cluster_labels = None
+            cluster_labels_path = paths["results"] / "cluster_labels.csv"
+            if cluster_labels_path.exists():
+                cluster_df = pd.read_csv(cluster_labels_path)
+                # Ensure cluster labels match embedding_df length
+                if len(cluster_df) == len(embedding_df):
+                    cluster_labels = cluster_df["cluster"].values
+                    print(f"DEBUG: Loaded cluster labels for {len(cluster_labels)} cells")
+                else:
+                    print(f"WARNING: Cluster labels length ({len(cluster_df)}) doesn't match embedding ({len(embedding_df)})")
+                    # Try to match by cell_index if available
+                    if "cell_index" in cluster_df.columns and "cell_index" in embedding_df.columns:
+                        cluster_df_merged = embedding_df[["cell_index"]].merge(
+                            cluster_df[["cell_index", "cluster"]],
+                            on="cell_index",
+                            how="left"
+                        )
+                        cluster_labels = cluster_df_merged["cluster"].values
+                        print(f"DEBUG: Matched cluster labels by cell_index")
+                    else:
+                        print(f"WARNING: Could not match cluster labels, skipping")
+            
+            # Update session state
+            self.session_state["embedding_df"] = embedding_df
+            self.session_state["metadata_df"] = metadata_df
+            self.session_state["stored_dim_reduction_method"] = method
+            self.session_state["features"] = run_info.get("features", [])
+            self.session_state["selected_population"] = run_info.get("population")
+            
+            if cluster_labels is not None:
+                self.session_state["cluster_labels"] = cluster_labels
+                clustering_info = run_info.get("clustering", {})
+                self.session_state["cluster_method"] = clustering_info.get("method", "Unknown")
+                self.session_state["cluster_param"] = clustering_info.get("n_clusters", 10)
+            
+            # Update UI
+            if hasattr(self, 'run_id_input'):
+                self.run_id_input.setText(run_id)
+            
+            # Update visualizations
+            self.update_visualization()
+            if cluster_labels is not None and hasattr(self, 'update_cluster_plot'):
+                self.update_cluster_plot()
+            
+            QMessageBox.information(self, "Success", 
+                f"✅ Run loaded successfully!\n\n"
+                f"Method: {method}\n"
+                f"Cells: {len(embedding_df)}\n"
+                f"Clustering: {'Yes' if cluster_labels is not None else 'No'}")
+            
+        except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
+            print(f"Error loading run data: {e}\n{error_trace}")
+            QMessageBox.critical(self, "Error", f"❌ Error loading run data: {str(e)[:200]}")
+    
     def dragEnterEvent(self, event: QDragEnterEvent):
         """Handle drag enter event."""
         if event.mimeData().hasUrls():
@@ -1529,18 +1803,19 @@ class MorphoMappingGUI(QMainWindow):
         
         # Store original DAF file paths (don't copy to save disk space)
         daf_file_info = []
+        files_to_convert = []
         
+        # Check which files need conversion (caching)
         for file_path_str in file_paths:
             file_path = safe_path(file_path_str)
             file_name = safe_str(file_path.name)
             
             # Store original path instead of copying
-            # The .daf files are only needed for conversion, not for later analysis
             original_path = str(file_path)
             
             self.session_state["uploaded_files"].append({
                 "name": file_name,
-                "path": original_path,  # Store original path
+                "path": original_path,
                 "size": file_path.stat().st_size,
             })
             
@@ -1550,8 +1825,49 @@ class MorphoMappingGUI(QMainWindow):
                 "size": file_path.stat().st_size,
             })
             
-            # Start background conversion (use original path)
+            # Check if FCS file already exists and is newer than DAF (caching)
             fcs_path = safe_path(paths["fcs"]) / f"{safe_str(file_path.stem)}.fcs"
+            if fcs_path.exists():
+                daf_mtime = file_path.stat().st_mtime
+                fcs_mtime = fcs_path.stat().st_mtime
+                if fcs_mtime > daf_mtime:
+                    # Already converted, skip
+                    self.processing_status.append(f"✅ {file_name} (already converted, skipped)")
+                    continue
+            
+            files_to_convert.append((file_path, fcs_path, file_name))
+        
+        # Start parallel conversions
+        if not files_to_convert:
+            QMessageBox.information(self, "Info", "✅ All files are already converted!")
+            self.update_status()
+            return
+        
+        # Reset conversion completion flag
+        self._conversion_complete_shown = False
+        self._total_files_to_convert = len(files_to_convert)
+        
+        # Determine max parallel conversions (based on CPU cores, but limit to 4-8)
+        import os
+        try:
+            cpu_count = os.cpu_count() or 4
+        except:
+            cpu_count = 4
+        max_parallel = min(4, cpu_count, len(files_to_convert))  # Max 4 parallel to avoid memory issues
+        
+        # Initialize progress tracking
+        self.conversion_progress.setVisible(True)
+        self.conversion_progress.setRange(0, len(files_to_convert))
+        self.conversion_progress.setValue(0)
+        self.conversion_progress.setFormat(f"Converting 0/{len(files_to_convert)} files...")
+        
+        # Start conversions (with parallel limit)
+        for i, (file_path, fcs_path, file_name) in enumerate(files_to_convert):
+            # Wait if too many workers are active
+            while len([w for w in self.active_workers if isinstance(w, ConversionWorker) and w.isRunning()]) >= max_parallel:
+                QApplication.processEvents()
+                time.sleep(0.1)
+            
             job_id = f"convert_{file_name}_{datetime.datetime.now().timestamp()}"
             
             worker = ConversionWorker(file_path, fcs_path, job_id)
@@ -1560,16 +1876,10 @@ class MorphoMappingGUI(QMainWindow):
             )
             self.active_workers.append(worker)
             
-            # Show progress bar
-            self.conversion_progress.setVisible(True)
-            self.conversion_progress.setRange(0, 0)  # Indeterminate progress
-            self.conversion_progress.setFormat(f"Converting {file_name}...")
-            
             worker.start()
-            
-            self.processing_status.append(f"🔄 Converting {file_name}...")
+            self.processing_status.append(f"🔄 Converting {file_name}... ({i+1}/{len(files_to_convert)})")
         
-        self.daf_files_label.setText(f"Selected {len(file_paths)} file(s)")
+        self.daf_files_label.setText(f"Selected {len(file_paths)} file(s) | Converting {len(files_to_convert)} file(s) in parallel (max {max_parallel})")
         
         # Save DAF file information to run info
         self._save_run_info(paths, daf_files=daf_file_info)
@@ -1585,7 +1895,8 @@ class MorphoMappingGUI(QMainWindow):
         layout = QVBoxLayout()
         
         # Drag and drop area
-        drop_area = QLabel("📁 Drag & Drop DAF files here\nor click button below")
+        drop_area = DropArea(self)
+        drop_area.setText("📁 Drag & Drop DAF files here\nor click button below")
         drop_area.setAlignment(Qt.AlignCenter)
         drop_area.setStyleSheet("""
             border: 2px dashed #4CAF50;
@@ -1596,9 +1907,6 @@ class MorphoMappingGUI(QMainWindow):
             font-size: 14px;
         """)
         drop_area.setMinimumHeight(100)
-        drop_area.setAcceptDrops(True)
-        drop_area.dragEnterEvent = lambda e: self.dragEnterEvent(e)
-        drop_area.dropEvent = lambda e: self.dropEvent(e)
         layout.addWidget(drop_area)
         
         # File selection button
@@ -1726,17 +2034,32 @@ class MorphoMappingGUI(QMainWindow):
         """Handle conversion completion."""
         self.processing_status.append(message)
         
-        # Hide progress bar if no more conversions running
+        # Update progress bar
         active_conversions = [w for w in self.active_workers if isinstance(w, ConversionWorker) and w.isRunning()]
+        finished_conversions = [w for w in self.active_workers if isinstance(w, ConversionWorker) and not w.isRunning()]
+        
+        if self.conversion_progress.isVisible():
+            total = self.conversion_progress.maximum()
+            completed = len(finished_conversions)
+            self.conversion_progress.setValue(completed)
+            self.conversion_progress.setFormat(f"Converting {completed}/{total} files... ({len(active_conversions)} active)")
+        
+        # Hide progress bar if no more conversions running
         if not active_conversions:
             self.conversion_progress.setVisible(False)
+            self.conversion_progress.setFormat("")
+            # Show completion message only once
+            if success and not self._conversion_complete_shown:
+                self._conversion_complete_shown = True
+                QMessageBox.information(self, "Conversion Complete", 
+                    f"✅ All {self._total_files_to_convert} file(s) converted successfully!")
         
         if success:
             self.update_status()
-            # Reload features after a short delay
-            QTimer.singleShot(2000, self.load_features_and_gates)
-            # Update metadata display to include new FCS files
-            QTimer.singleShot(2000, self.update_metadata_display)
+            # Reload features after a short delay (only once when all done)
+            if not active_conversions:
+                QTimer.singleShot(2000, self.load_features_and_gates)
+                QTimer.singleShot(2000, self.update_metadata_display)
         
         # Remove worker from active list once finished
         if worker in self.active_workers:
@@ -1819,13 +2142,30 @@ class MorphoMappingGUI(QMainWindow):
             else:
                 self.session_state["metadata_df"] = pd.DataFrame(columns=["file_name", "sample_id", "group", "replicate"])
         else:
-            # Update existing metadata: add new FCS files
+            # Update existing metadata: add new FCS files (only if metadata was auto-generated)
+            # Check if metadata looks like it was auto-generated (has empty group/replicate columns)
+            is_auto_generated = False
+            if "group" in self.session_state["metadata_df"].columns:
+                non_empty_groups = self.session_state["metadata_df"]["group"].astype(str).str.strip()
+                is_auto_generated = (non_empty_groups == "").all()
+            
             existing_file_names = set()
             if "file_name" in self.session_state["metadata_df"].columns:
-                existing_file_names = set(self.session_state["metadata_df"]["file_name"].astype(str).dropna().values)
+                # Normalize existing file_names (remove .daf/.fcs if present)
+                existing_file_names = set(
+                    self.session_state["metadata_df"]["file_name"]
+                    .astype(str)
+                    .str.replace(r'\.(daf|fcs)$', '', regex=True)
+                    .dropna()
+                    .values
+                )
             
-            new_fcs_files = [f for f in fcs_files if f not in existing_file_names]
-            if new_fcs_files:
+            # Normalize fcs_files for comparison (they're already stems, but be safe)
+            fcs_files_normalized = [f.replace('.daf', '').replace('.fcs', '') for f in fcs_files]
+            new_fcs_files = [f for f in fcs_files_normalized if f not in existing_file_names]
+            
+            # Only add new files if metadata was auto-generated (not from Excel upload)
+            if new_fcs_files and is_auto_generated:
                 max_sample_num = 0
                 if "sample_id" in self.session_state["metadata_df"].columns:
                     for sid in self.session_state["metadata_df"]["sample_id"].astype(str).values:
@@ -1891,7 +2231,40 @@ class MorphoMappingGUI(QMainWindow):
             run_id = safe_str(self.session_state["run_id"])
             paths = get_run_paths(safe_path(project_dir), run_id)
             metadata_path = safe_path(paths["metadata"]) / "sample_sheet.csv"
-            save_metadata_file(self.session_state["metadata_df"], metadata_path)
+            
+            try:
+                save_metadata_file(self.session_state["metadata_df"], metadata_path)
+            except OSError as e:
+                if e.errno == 28:  # No space left on device
+                    import shutil
+                    # Try to clean up temporary files
+                    temp_dirs = list(paths["fcs"].glob(".tmp_*"))
+                    for temp_dir in temp_dirs:
+                        try:
+                            if temp_dir.is_dir():
+                                shutil.rmtree(temp_dir)
+                                print(f"Cleaned up temporary directory: {temp_dir}")
+                        except:
+                            pass
+                    
+                    # Try again
+                    try:
+                        save_metadata_file(self.session_state["metadata_df"], metadata_path)
+                    except OSError as e2:
+                        if e2.errno == 28:
+                            # Get free space
+                            base_path = paths["base"]
+                            free_space_gb = shutil.disk_usage(base_path).free / (1024**3)
+                            QMessageBox.critical(
+                                self,
+                                "Disk Space Error",
+                                f"❌ No space left on device!\n\n"
+                                f"Path: {metadata_path.parent}\n\n"
+                                f"Please free up disk space and try again.\n"
+                                f"Current free space: {free_space_gb:.1f} GB"
+                            )
+                            return
+                        raise
             
             QMessageBox.information(self, "Success", f"✅ Metadata saved: {len(new_data)} rows")
             self.update_status()
@@ -1918,27 +2291,139 @@ class MorphoMappingGUI(QMainWindow):
             project_dir = safe_str(self.session_state.get("project_dir", PROJECT_ROOT))
             run_id = safe_str(self.session_state["run_id"])
             paths = get_run_paths(safe_path(project_dir), run_id)
-            metadata_path = safe_path(paths["metadata"]) / safe_str(Path(file_path).name)
+            metadata_path = safe_path(paths["metadata"]) / "sample_sheet.csv"
             metadata_path.parent.mkdir(parents=True, exist_ok=True)
             
-            import shutil
-            shutil.copy2(file_path, metadata_path)
-            
-            # Load and store
+            # Load metadata file
             if file_path.endswith('.csv'):
-                self.session_state["metadata_df"] = pd.read_csv(metadata_path)
+                metadata_df = pd.read_csv(file_path)
             elif file_path.endswith(('.xlsx', '.xls')):
-                self.session_state["metadata_df"] = pd.read_excel(metadata_path)
+                metadata_df = pd.read_excel(file_path)
+            else:
+                QMessageBox.critical(self, "Error", "❌ Unsupported file format. Please use CSV or Excel.")
+                return
             
-            if "file_name" in self.session_state["metadata_df"].columns and "sample_id" not in self.session_state["metadata_df"].columns:
-                self.session_state["metadata_df"]["sample_id"] = self.session_state["metadata_df"]["file_name"]
+            # VALIDATION 1: Check for required column
+            if "file_name" not in metadata_df.columns:
+                QMessageBox.critical(
+                    self, 
+                    "Missing Required Column", 
+                    "❌ The metadata file MUST contain a 'file_name' column.\n\n"
+                    "This column should contain the .daf filenames (with or without the .daf extension)."
+                )
+                return
             
-            self.metadata_upload_status.setText(f"✅ Loaded: {len(self.session_state['metadata_df'])} rows")
+            # Normalize file_name: remove .daf extension if present (for consistent matching)
+            metadata_df["file_name"] = metadata_df["file_name"].astype(str).str.replace(r'\.daf$', '', regex=True)
+            
+            # Create sample_id from file_name if not present
+            if "sample_id" not in metadata_df.columns:
+                metadata_df["sample_id"] = metadata_df["file_name"].copy()
+            
+            # VALIDATION 2: Check for matches with loaded DAF files
+            # Get list of loaded FCS files (from converted DAFs)
+            fcs_dir = paths["fcs"]
+            if fcs_dir.exists():
+                fcs_files = [f.stem for f in fcs_dir.glob("*.fcs")]
+                
+                # Clean metadata file_names (remove .daf extension if present)
+                metadata_df["file_name_clean"] = metadata_df["file_name"].astype(str).str.replace(r'\.daf$', '', regex=True)
+                metadata_files = metadata_df["file_name_clean"].unique().tolist()
+                
+                # Find mismatches
+                metadata_not_in_daf = set(metadata_files) - set(fcs_files)
+                daf_not_in_metadata = set(fcs_files) - set(metadata_files)
+                matched = set(metadata_files) & set(fcs_files)
+                
+                # Build warning message
+                warnings = []
+                if metadata_not_in_daf:
+                    warnings.append(f"⚠️ Files in metadata but NOT in loaded DAF files ({len(metadata_not_in_daf)}):\n" + 
+                                  "\n".join([f"  • {f}" for f in sorted(list(metadata_not_in_daf))[:5]]))
+                    if len(metadata_not_in_daf) > 5:
+                        warnings[-1] += f"\n  ... and {len(metadata_not_in_daf) - 5} more"
+                
+                if daf_not_in_metadata:
+                    warnings.append(f"⚠️ Loaded DAF files NOT in metadata ({len(daf_not_in_metadata)}):\n" + 
+                                  "\n".join([f"  • {f}" for f in sorted(list(daf_not_in_metadata))[:5]]))
+                    if len(daf_not_in_metadata) > 5:
+                        warnings[-1] += f"\n  ... and {len(daf_not_in_metadata) - 5} more"
+                
+                # Show validation dialog
+                if warnings:
+                    msg = QMessageBox(self)
+                    msg.setIcon(QMessageBox.Warning)
+                    msg.setWindowTitle("Metadata Validation")
+                    msg.setText(f"✅ Matched: {len(matched)} files\n\n" + "\n\n".join(warnings))
+                    msg.setInformativeText(
+                        "\n⚠️ Mismatched files will be excluded from analysis.\n"
+                        "Only cells from matched files will be used.\n\n"
+                        "Do you want to continue?"
+                    )
+                    msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+                    msg.setDefaultButton(QMessageBox.No)
+                    
+                    if msg.exec() == QMessageBox.No:
+                        return
+                else:
+                    QMessageBox.information(
+                        self,
+                        "Perfect Match",
+                        f"✅ All {len(matched)} files match perfectly!\n\n"
+                        "Metadata and DAF files are fully compatible."
+                    )
+            
+            # REPLACE existing metadata with uploaded metadata (don't merge to avoid duplicates)
+            # This ensures that uploaded Excel/CSV data takes precedence over auto-generated entries
+            self.session_state["metadata_df"] = metadata_df.copy()
+            
+            # Save to standard location (with better error handling for disk space)
+            try:
+                # Ensure directory exists
+                metadata_path.parent.mkdir(parents=True, exist_ok=True)
+                metadata_df.to_csv(metadata_path, index=False)
+            except OSError as e:
+                if e.errno == 28:  # No space left on device
+                    # Try to clean up temporary files first
+                    import shutil
+                    temp_dirs = list(metadata_path.parent.parent.glob(".tmp_*"))
+                    for temp_dir in temp_dirs:
+                        try:
+                            if temp_dir.is_dir():
+                                shutil.rmtree(temp_dir)
+                                print(f"Cleaned up temporary directory: {temp_dir}")
+                        except:
+                            pass
+                    
+                    # Try again
+                    try:
+                        metadata_path.parent.mkdir(parents=True, exist_ok=True)
+                        metadata_df.to_csv(metadata_path, index=False)
+                    except OSError as e2:
+                        if e2.errno == 28:
+                            # Get free space
+                            free_space_gb = shutil.disk_usage(metadata_path.parent.parent).free / (1024**3)
+                            QMessageBox.critical(
+                                self,
+                                "Disk Space Error",
+                                f"❌ No space left on device!\n\n"
+                                f"Path: {metadata_path.parent}\n\n"
+                                f"Please free up disk space and try again.\n"
+                                f"Current free space: {free_space_gb:.1f} GB"
+                            )
+                            return
+                        raise
+            
+            self.metadata_upload_status.setText(f"✅ Loaded: {len(metadata_df)} rows")
             self.metadata_upload_status.setStyleSheet("color: green;")
             self.update_metadata_display()
             self.update_status()
+            
         except Exception as ex:
-            QMessageBox.critical(self, "Error", f"❌ Metadata error: {str(ex)}")
+            import traceback
+            error_trace = traceback.format_exc()
+            print(f"Metadata upload error: {ex}\n{error_trace}")
+            QMessageBox.critical(self, "Error", f"❌ Metadata error: {str(ex)[:200]}")
     
     def create_features_section(self) -> QGroupBox:
         """Create features and gates selection section."""
@@ -2066,6 +2551,18 @@ class MorphoMappingGUI(QMainWindow):
         self.selected_count_label.setStyleSheet("color: green;")
         features_layout.addWidget(self.selected_count_label)
         
+        # Feature Import/Export buttons
+        feature_io_row = QHBoxLayout()
+        import_features_btn = QPushButton("📥 Import Features (Excel)")
+        import_features_btn.clicked.connect(self.import_features_from_excel)
+        feature_io_row.addWidget(import_features_btn)
+        
+        export_features_btn = QPushButton("📤 Export Features (Excel)")
+        export_features_btn.clicked.connect(self.export_features_to_excel)
+        feature_io_row.addWidget(export_features_btn)
+        
+        features_layout.addLayout(feature_io_row)
+        
         features_group.setLayout(features_layout)
         layout.addWidget(features_group)
         
@@ -2147,6 +2644,211 @@ class MorphoMappingGUI(QMainWindow):
         
         self.session_state["features"] = self.feature_selection_state["selected_features"]
         self.load_features_and_gates()
+    
+    def import_features_from_excel(self):
+        """Import feature selection from Excel file."""
+        if not self.session_state.get("run_id"):
+            QMessageBox.warning(self, "Warning", "⚠️ Please set Run-ID first")
+            return
+        
+        # First, ensure features are loaded
+        if not self.feature_selection_state.get("available_features"):
+            QMessageBox.warning(self, "Warning", "⚠️ Please load features first by selecting DAF files.")
+            return
+        
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Features from Excel",
+            "",
+            "Excel Files (*.xlsx *.xls);;All Files (*)"
+        )
+        
+        if not file_path:
+            return
+        
+        try:
+            # Load Excel file
+            df = pd.read_excel(file_path)
+            
+            # Check for required columns
+            if "included" not in df.columns and "Included" not in df.columns:
+                QMessageBox.warning(
+                    self, 
+                    "Invalid Format", 
+                    "❌ Excel file must contain an 'included' column.\n\n"
+                    "Expected format:\n"
+                    "- Column 'included': List of included features\n"
+                    "- Column 'excluded' (optional): List of excluded features"
+                )
+                return
+            
+            # Find the correct column names (case-insensitive)
+            included_col = None
+            excluded_col = None
+            for col in df.columns:
+                if col.lower() == "included":
+                    included_col = col
+                elif col.lower() == "excluded":
+                    excluded_col = col
+            
+            if included_col is None:
+                QMessageBox.warning(self, "Invalid Format", "❌ Could not find 'included' column in Excel file.")
+                return
+            
+            # Get included features from Excel
+            included_from_file = []
+            if included_col in df.columns:
+                # Handle different formats: list in one cell, or one feature per row
+                if len(df) == 1:
+                    # Single row with list
+                    val = df[included_col].iloc[0]
+                    if isinstance(val, str):
+                        # Try to parse as comma-separated or newline-separated
+                        included_from_file = [f.strip() for f in val.replace('\n', ',').split(',') if f.strip()]
+                    elif pd.notna(val):
+                        included_from_file = [str(val)]
+                else:
+                    # Multiple rows, one feature per row
+                    included_from_file = [str(f).strip() for f in df[included_col].dropna().unique() if str(f).strip()]
+            
+            # Get excluded features from Excel (optional)
+            excluded_from_file = []
+            if excluded_col and excluded_col in df.columns:
+                if len(df) == 1:
+                    val = df[excluded_col].iloc[0]
+                    if isinstance(val, str):
+                        excluded_from_file = [f.strip() for f in val.replace('\n', ',').split(',') if f.strip()]
+                    elif pd.notna(val):
+                        excluded_from_file = [str(val)]
+                else:
+                    excluded_from_file = [str(f).strip() for f in df[excluded_col].dropna().unique() if str(f).strip()]
+            
+            # Validate features against available features
+            available_features_set = set(self.feature_selection_state.get("available_features", []))
+            
+            # Check for features that don't exist
+            missing_included = [f for f in included_from_file if f not in available_features_set]
+            missing_excluded = [f for f in excluded_from_file if f not in available_features_set]
+            
+            # Warning message for missing features
+            warning_msg = ""
+            if missing_included:
+                warning_msg += f"⚠️ {len(missing_included)} included feature(s) not found in current data:\n"
+                warning_msg += f"{', '.join(missing_included[:5])}"
+                if len(missing_included) > 5:
+                    warning_msg += f" ... and {len(missing_included) - 5} more"
+                warning_msg += "\n\n"
+            
+            if missing_excluded:
+                warning_msg += f"⚠️ {len(missing_excluded)} excluded feature(s) not found in current data:\n"
+                warning_msg += f"{', '.join(missing_excluded[:5])}"
+                if len(missing_excluded) > 5:
+                    warning_msg += f" ... and {len(missing_excluded) - 5} more"
+                warning_msg += "\n\n"
+            
+            # Filter to only include features that exist
+            valid_included = [f for f in included_from_file if f in available_features_set]
+            valid_excluded = [f for f in excluded_from_file if f in available_features_set]
+            
+            # Check if we have too few features
+            if len(valid_included) == 0:
+                QMessageBox.warning(
+                    self,
+                    "No Valid Features",
+                    "❌ No valid included features found in Excel file.\n\n"
+                    "All features in the 'included' column are missing from the current data."
+                )
+                return
+            
+            # Apply the feature selection
+            self.feature_selection_state["selected_features"] = valid_included
+            self.feature_selection_state["excluded_features"] = valid_excluded
+            self.session_state["features"] = valid_included
+            
+            # Reload the UI
+            self.load_features_and_gates()
+            
+            # Show success message with warnings if any
+            success_msg = f"✅ Imported {len(valid_included)} included feature(s)"
+            if valid_excluded:
+                success_msg += f" and {len(valid_excluded)} excluded feature(s)"
+            success_msg += "."
+            
+            if warning_msg:
+                QMessageBox.warning(self, "Import with Warnings", warning_msg + success_msg)
+            else:
+                QMessageBox.information(self, "Success", success_msg)
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"❌ Error importing features: {str(e)}")
+    
+    def export_features_to_excel(self):
+        """Export current feature selection to Excel file."""
+        if not self.session_state.get("run_id"):
+            QMessageBox.warning(self, "Warning", "⚠️ Please set Run-ID first")
+            return
+        
+        # Check if we have features to export
+        selected_features = self.feature_selection_state.get("selected_features", [])
+        excluded_features = self.feature_selection_state.get("excluded_features", [])
+        
+        if not selected_features and not excluded_features:
+            QMessageBox.warning(self, "Warning", "⚠️ No features selected. Please select features first.")
+            return
+        
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Features to Excel",
+            f"features_{self.session_state.get('run_id', 'export')}.xlsx",
+            "Excel Files (*.xlsx);;All Files (*)"
+        )
+        
+        if not file_path:
+            return
+        
+        try:
+            # Create DataFrame with features
+            data = {
+                "included": selected_features if selected_features else [""],
+                "excluded": excluded_features if excluded_features else [""]
+            }
+            
+            # Ensure both lists have the same length (pad with empty strings)
+            max_len = max(len(selected_features), len(excluded_features))
+            if max_len == 0:
+                max_len = 1
+            
+            included_padded = selected_features + [""] * (max_len - len(selected_features))
+            excluded_padded = excluded_features + [""] * (max_len - len(excluded_features))
+            
+            df = pd.DataFrame({
+                "included": included_padded,
+                "excluded": excluded_padded
+            })
+            
+            # Remove empty rows at the end
+            df = df[~(df["included"].astype(str).str.strip() == "") & 
+                    ~(df["excluded"].astype(str).str.strip() == "")].copy()
+            
+            # If we removed everything, add at least one row
+            if len(df) == 0:
+                df = pd.DataFrame({
+                    "included": selected_features if selected_features else [""],
+                    "excluded": excluded_features if excluded_features else [""]
+                })
+            
+            # Save to Excel
+            df.to_excel(file_path, index=False, engine='openpyxl')
+            
+            QMessageBox.information(
+                self, 
+                "Success", 
+                f"✅ Features exported to:\n{file_path}\n\n"
+                f"Included: {len(selected_features)} feature(s)\n"
+                f"Excluded: {len(excluded_features)} feature(s)"
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"❌ Error exporting features: {str(e)}")
     
     def load_features_and_gates(self):
         """Load available features and gates from FCS files."""
@@ -2763,6 +3465,11 @@ class MorphoMappingGUI(QMainWindow):
                     self.top10_features_btn.setVisible(True)
                     print(f"DEBUG: Top10 Features button set to visible after analysis")
             
+            if hasattr(self, 'pca_plot_btn'):
+                # PCA button should be visible if we have features and metadata
+                self.pca_plot_btn.setVisible(True)
+                print(f"DEBUG: PCA Plot button set to visible after analysis")
+            
             # Update visualization immediately - this will show the plot with default "group" coloring
             self.update_visualization()
             if hasattr(self, 'update_clustering_section'):
@@ -2936,6 +3643,13 @@ class MorphoMappingGUI(QMainWindow):
             self.top10_features_btn.setVisible(False)
         viz_controls.addWidget(self.top10_features_btn)
         
+        # PCA Plot button (sample-level, grouped by groups)
+        self.pca_plot_btn = QPushButton("📈 PCA Plot (Sample-Level)")
+        self.pca_plot_btn.setStyleSheet("background-color: #009688; color: white; padding: 3px;")
+        self.pca_plot_btn.clicked.connect(self.export_pca_plot)
+        # Always visible - PCA can be run if metadata with groups is available
+        viz_controls.addWidget(self.pca_plot_btn)
+        
         # Right: Clustering controls
         cluster_controls = QVBoxLayout()
         cluster_controls.addWidget(QLabel("🔬 Clustering (Right):"))
@@ -2996,6 +3710,14 @@ class MorphoMappingGUI(QMainWindow):
         cluster_cells_btn.clicked.connect(self.export_cluster_cells)
         analysis_btn_layout.addWidget(cluster_cells_btn)
         cluster_controls.addLayout(analysis_btn_layout)
+        
+        # Advanced Analysis buttons
+        advanced_analysis_layout = QHBoxLayout()
+        bar_graphs_btn = QPushButton("📊 Group-Cluster Bar Graphs")
+        bar_graphs_btn.setStyleSheet("background-color: #795548; color: white; padding: 3px;")
+        bar_graphs_btn.clicked.connect(self.export_group_cluster_bar_graphs)
+        advanced_analysis_layout.addWidget(bar_graphs_btn)
+        cluster_controls.addLayout(advanced_analysis_layout)
         
         # Add both control groups to top row
         top_controls.addLayout(viz_controls, 1)
@@ -3125,6 +3847,10 @@ class MorphoMappingGUI(QMainWindow):
             self.top10_features_btn.setVisible(True)
         else:
             self.top10_features_btn.setVisible(False)  # Only show after analysis
+        
+        # PCA button should always be visible (needs features and metadata, not embedding_df)
+        if hasattr(self, 'pca_plot_btn'):
+            self.pca_plot_btn.setVisible(True)
         top_layout.addWidget(self.top10_features_btn)
         
         layout.addLayout(top_layout)
@@ -3203,6 +3929,10 @@ class MorphoMappingGUI(QMainWindow):
         elif hasattr(self, 'viz_section'):
             self.viz_section.setVisible(True)
             print("DEBUG update_visualization: viz_section set to visible")
+        
+        # Ensure PCA button is visible
+        if hasattr(self, 'pca_plot_btn'):
+            self.pca_plot_btn.setVisible(True)
         
         # Process events to ensure UI is updated before drawing plot
         QApplication.processEvents()
@@ -4220,6 +4950,18 @@ class MorphoMappingGUI(QMainWindow):
                     "parameters": cluster_params,
                 }
             )
+            
+            # Save cluster labels to disk for later loading
+            try:
+                cluster_labels_df = pd.DataFrame({
+                    "cell_index": range(len(self.session_state["cluster_labels"])),
+                    "cluster": self.session_state["cluster_labels"]
+                })
+                cluster_labels_path = paths["results"] / "cluster_labels.csv"
+                cluster_labels_df.to_csv(cluster_labels_path, index=False)
+                print(f"DEBUG: Saved cluster labels to {cluster_labels_path}")
+            except Exception as e:
+                print(f"Warning: Could not save cluster labels: {e}")
             
             self.update_status()
             self.update_cluster_plot()
@@ -5415,6 +6157,393 @@ class MorphoMappingGUI(QMainWindow):
             error_trace = traceback.format_exc()
             print(f"Error exporting cluster heatmap: {e}\n{error_trace}")
             QMessageBox.critical(self, "Error", f"❌ Error: {str(e)[:200]}")
+    
+    def export_group_cluster_bar_graphs(self):
+        """Export bar graphs showing % of cells from each group in each cluster, with SEM and statistics.
+        
+        Creates one graph per cluster, with groups on X-axis and % cells from group in cluster on Y-axis.
+        Includes SEM error bars and statistical significance markers (stars).
+        """
+        if self.session_state.get("cluster_labels") is None or self.session_state.get("embedding_df") is None:
+            QMessageBox.warning(self, "Warning", "No cluster data available. Run clustering first.")
+            return
+        
+        # Check for group column
+        embedding_df = self.session_state["embedding_df"].copy()
+        embedding_df["cluster"] = self.session_state["cluster_labels"]
+        embedding_df["cluster"] = embedding_df["cluster"].astype(str)
+        embedding_df.loc[embedding_df["cluster"] == "-1", "cluster"] = "Noise"
+        
+        # Determine which metadata column to use for grouping
+        group_column = None
+        metadata_df = self.session_state.get("metadata_df")
+        if metadata_df is not None:
+            # Check for common group column names
+            for col in ["group", "Group", "condition", "Condition", "treatment", "Treatment"]:
+                if col in metadata_df.columns:
+                    group_column = col
+                    break
+        
+        if group_column is None or group_column not in embedding_df.columns:
+            QMessageBox.warning(
+                self,
+                "Warning",
+                "No group column found in metadata.\n\n"
+                "Please add a 'group' column to your metadata with group labels (e.g., 'Control', 'Treatment')."
+            )
+            return
+        
+        # Filter out NaN and empty groups
+        embedding_df = embedding_df[embedding_df[group_column].notna()]
+        embedding_df = embedding_df[embedding_df[group_column].astype(str).str.strip() != ""]
+        
+        if len(embedding_df) == 0:
+            QMessageBox.warning(self, "Warning", "No valid groups found in data.")
+            return
+        
+        try:
+            from scipy import stats
+            from scipy.stats import ttest_ind
+            
+            # Get paths
+            project_dir = safe_str(self.session_state.get("project_dir", PROJECT_ROOT))
+            run_id = safe_str(self.session_state["run_id"])
+            paths = get_run_paths(safe_path(project_dir), run_id)
+            paths["results"].mkdir(parents=True, exist_ok=True)
+            
+            clusters = sorted([c for c in embedding_df["cluster"].unique() if pd.notna(c)])
+            groups = sorted([g for g in embedding_df[group_column].unique() if pd.notna(g)])
+            
+            if len(groups) < 2:
+                QMessageBox.warning(self, "Warning", "Need at least 2 groups for statistical comparison.")
+                return
+            
+            # Calculate statistics per cluster
+            # For each cluster, calculate % of cells from each group that are in this cluster
+            # We need to calculate this per sample (replicate) to get SEM
+            
+            # Get sample_id column
+            if "sample_id" not in embedding_df.columns:
+                QMessageBox.warning(self, "Warning", "No sample_id column found. Cannot calculate SEM.")
+                return
+            
+            # Calculate per sample: for each sample, what % of its cells are in each cluster
+            results_per_cluster = {}
+            
+            for cluster in clusters:
+                cluster_data = []
+                
+                # For each group
+                for group in groups:
+                    group_df = embedding_df[embedding_df[group_column] == group]
+                    
+                    # Get unique samples in this group
+                    samples_in_group = group_df["sample_id"].unique()
+                    
+                    percentages_per_sample = []
+                    for sample_id in samples_in_group:
+                        sample_df = group_df[group_df["sample_id"] == sample_id]
+                        total_cells_in_sample = len(sample_df)
+                        
+                        if total_cells_in_sample == 0:
+                            continue
+                        
+                        cells_in_cluster = len(sample_df[sample_df["cluster"] == cluster])
+                        percentage = (cells_in_cluster / total_cells_in_sample) * 100
+                        percentages_per_sample.append(percentage)
+                    
+                    if len(percentages_per_sample) > 0:
+                        mean_pct = np.mean(percentages_per_sample)
+                        sem = stats.sem(percentages_per_sample) if len(percentages_per_sample) > 1 else 0
+                        cluster_data.append({
+                            "group": group,
+                            "mean": mean_pct,
+                            "sem": sem,
+                            "n": len(percentages_per_sample),
+                            "values": percentages_per_sample
+                        })
+                
+                results_per_cluster[cluster] = cluster_data
+            
+            # Create one plot per cluster
+            for cluster in clusters:
+                cluster_data = results_per_cluster[cluster]
+                if not cluster_data:
+                    continue
+                
+                # Prepare data for plotting
+                groups_plot = [d["group"] for d in cluster_data]
+                means = [d["mean"] for d in cluster_data]
+                sems = [d["sem"] for d in cluster_data]
+                values_list = [d["values"] for d in cluster_data]
+                
+                # Statistical testing: pairwise t-tests between groups
+                # Only store significant comparisons (p < 0.05)
+                significance_markers = []
+                for i in range(len(groups_plot)):
+                    for j in range(i + 1, len(groups_plot)):
+                        # Perform t-test
+                        group1_values = values_list[i]
+                        group2_values = values_list[j]
+                        
+                        if len(group1_values) > 1 and len(group2_values) > 1:
+                            try:
+                                t_stat, p_value = ttest_ind(group1_values, group2_values)
+                                
+                                # Only add if significant (p < 0.05)
+                                if p_value < 0.05:
+                                    # Determine significance marker
+                                    if p_value < 0.001:
+                                        marker = "***"
+                                    elif p_value < 0.01:
+                                        marker = "**"
+                                    else:
+                                        marker = "*"
+                                    
+                                    # Store for annotation
+                                    significance_markers.append({
+                                        "group1_idx": i,
+                                        "group2_idx": j,
+                                        "p_value": p_value,
+                                        "marker": marker
+                                    })
+                            except:
+                                pass
+                
+                # Create figure with appropriate size (matching other plots)
+                fig, ax = plt.subplots(figsize=(10, 6))
+                
+                # Create bar plot
+                x_pos = np.arange(len(groups_plot))
+                bars = ax.bar(x_pos, means, yerr=sems, capsize=5, 
+                             color=COLOR_PALETTE[:len(groups_plot)], 
+                             alpha=0.7, edgecolor='black', linewidth=1.5)
+                
+                # Add individual data points
+                for i, (group_idx, values) in enumerate(zip(range(len(groups_plot)), values_list)):
+                    x_scatter = np.random.normal(i, 0.1, size=len(values))
+                    ax.scatter(x_scatter, values, color='black', alpha=0.5, s=30, zorder=10)
+                
+                # Add significance markers (only for significant comparisons)
+                y_max = max(means) + max(sems) if sems else max(means)
+                y_range = y_max * 0.1  # 10% of max for spacing
+                
+                if significance_markers:
+                    for sig_idx, sig in enumerate(significance_markers):
+                        i1, i2 = sig["group1_idx"], sig["group2_idx"]
+                        y_line = y_max + y_range * (1 + sig_idx)
+                        
+                        # Draw line
+                        ax.plot([i1, i2], [y_line, y_line], 'k-', linewidth=1.5)
+                        # Add marker
+                        ax.text((i1 + i2) / 2, y_line + y_range * 0.1, sig["marker"], 
+                               ha='center', va='bottom', fontsize=12, fontweight='bold')
+                    
+                    # Adjust y-axis limit to accommodate significance markers
+                    ax.set_ylim(bottom=0, top=y_max + y_range * (2 + len(significance_markers)))
+                else:
+                    # No significant differences, just set normal y-axis limit
+                    ax.set_ylim(bottom=0, top=y_max * 1.15)
+                
+                # Formatting
+                ax.set_xlabel("Group", fontsize=14, fontweight="bold")
+                ax.set_ylabel("% Cells from Group in Cluster", fontsize=14, fontweight="bold")
+                ax.set_title(f"Cluster {cluster}: Group Distribution", fontsize=16, fontweight="bold")
+                ax.set_xticks(x_pos)
+                ax.set_xticklabels(groups_plot, fontsize=12)
+                ax.tick_params(axis='y', labelsize=12)
+                ax.grid(axis='y', alpha=0.3, linestyle='--')
+                
+                plt.tight_layout()
+                
+                # Save plot
+                output_path = paths["results"] / f"cluster_{cluster}_group_bar_graph.png"
+                plt.savefig(output_path, dpi=300, bbox_inches="tight")
+                plt.close(fig)
+            
+            QMessageBox.information(
+                self,
+                "Success",
+                f"✅ Bar graphs exported for {len(clusters)} cluster(s):\n"
+                f"{paths['results']}\n\n"
+                f"Files: cluster_*_group_bar_graph.png"
+            )
+        except Exception as e:
+            import traceback
+            QMessageBox.critical(self, "Error", f"❌ Error creating bar graphs: {str(e)}\n\n{traceback.format_exc()}")
+    
+    def export_pca_plot(self):
+        """Export PCA plot on sample-level, colored by groups to visualize group differences."""
+        if self.session_state.get("embedding_df") is None:
+            QMessageBox.warning(self, "Warning", "No embedding data available. Run analysis first.")
+            return
+        
+        # Check for group column in metadata
+        metadata_df = self.session_state.get("metadata_df")
+        if metadata_df is None or len(metadata_df) == 0:
+            QMessageBox.warning(self, "Warning", "No metadata available. Please add metadata with group information.")
+            return
+        
+        # Determine which metadata column to use for grouping
+        group_column = None
+        for col in ["group", "Group", "condition", "Condition", "treatment", "Treatment"]:
+            if col in metadata_df.columns:
+                group_column = col
+                break
+        
+        if group_column is None:
+            QMessageBox.warning(
+                self,
+                "Warning",
+                "No group column found in metadata.\n\n"
+                "Please add a 'group' column to your metadata with group labels."
+            )
+            return
+        
+        try:
+            from sklearn.decomposition import PCA
+            from sklearn.preprocessing import StandardScaler
+            
+            # Get features
+            features = self.session_state.get("features", [])
+            if not features:
+                QMessageBox.warning(self, "Warning", "No features available. Run analysis first.")
+                return
+            
+            # Get paths
+            project_dir = safe_str(self.session_state.get("project_dir", PROJECT_ROOT))
+            run_id = safe_str(self.session_state["run_id"])
+            paths = get_run_paths(safe_path(project_dir), run_id)
+            
+            # Load feature data from CSV cache - calculate mean per sample
+            cache_dir = paths["csv_cache"]
+            
+            # Collect mean feature values per sample
+            sample_data = []
+            sample_groups = {}
+            
+            for fcs_file in sorted(paths["fcs"].glob("*.fcs")):
+                fcs_stem = str(fcs_file.stem)
+                
+                csv_path = cache_dir / f"{fcs_stem}.csv"
+                if not csv_path.exists():
+                    continue
+                
+                df = pd.read_csv(csv_path)
+                
+                # Filter by population if selected
+                population = self.session_state.get("selected_population")
+                if population and population in df.columns:
+                    pop_series = df[population]
+                    if isinstance(pop_series, pd.DataFrame):
+                        pop_series = pop_series.iloc[:, 0]
+                    pop_array = np.asarray(pop_series)
+                    if pop_series.dtype == bool or str(pop_series.dtype) == 'bool':
+                        mask = pop_array == True
+                        df = df[mask]
+                    else:
+                        mask = pop_array == 1
+                        df = df[mask]
+                
+                # Select only available features
+                available_features = [f for f in features if f in df.columns]
+                if not available_features:
+                    continue
+                
+                # Calculate mean per feature for this sample
+                sample_means = df[available_features].mean().to_dict()
+                sample_means["sample_id"] = fcs_stem
+                sample_data.append(sample_means)
+                
+                # Get group for this sample from metadata
+                sample_meta = metadata_df[metadata_df["file_name"].astype(str).str.replace(r'\.(daf|fcs)$', '', regex=True) == fcs_stem]
+                if len(sample_meta) > 0 and group_column in sample_meta.columns:
+                    group_val = sample_meta[group_column].iloc[0]
+                    if pd.notna(group_val) and str(group_val).strip() != "":
+                        sample_groups[fcs_stem] = str(group_val).strip()
+            
+            if not sample_data:
+                QMessageBox.warning(self, "Warning", "Could not load feature data from CSV cache.")
+                return
+            
+            # Create DataFrame with sample means
+            sample_df = pd.DataFrame(sample_data)
+            sample_df["group"] = sample_df["sample_id"].map(sample_groups)
+            
+            # Filter out samples without groups
+            sample_df = sample_df[sample_df["group"].notna()]
+            sample_df = sample_df[sample_df["group"].astype(str).str.strip() != ""]
+            
+            if len(sample_df) == 0:
+                QMessageBox.warning(self, "Warning", "No samples with valid groups found.")
+                return
+            
+            # Prepare data for PCA (exclude sample_id and group columns)
+            feature_cols = [f for f in features if f in sample_df.columns]
+            if len(feature_cols) == 0:
+                QMessageBox.warning(self, "Warning", "No valid features found in sample data.")
+                return
+            
+            X = sample_df[feature_cols].values
+            
+            # Remove NaN and infinite values
+            mask = ~(np.isnan(X).any(axis=1) | np.isinf(X).any(axis=1))
+            X = X[mask]
+            sample_df = sample_df[mask]
+            
+            if len(X) == 0:
+                QMessageBox.warning(self, "Warning", "No valid data after removing NaN/Inf values.")
+                return
+            
+            # Standardize features
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(X)
+            
+            # Perform PCA
+            pca = PCA(n_components=2)
+            X_pca = pca.fit_transform(X_scaled)
+            
+            # Create plot
+            fig, ax = plt.subplots(figsize=(10, 8))
+            
+            groups = sorted([g for g in sample_df["group"].unique() if pd.notna(g)])
+            colors = COLOR_PALETTE[:len(groups)]
+            
+            for i, group in enumerate(groups):
+                group_mask = sample_df["group"] == group
+                group_pca = X_pca[group_mask]
+                
+                ax.scatter(group_pca[:, 0], group_pca[:, 1], 
+                          label=str(group), alpha=0.7, s=100, color=colors[i], edgecolors='black', linewidth=1.5)
+            
+            # Formatting
+            explained_var = pca.explained_variance_ratio_
+            ax.set_xlabel(f"PC1 ({explained_var[0]*100:.1f}% variance)", fontsize=14, fontweight="bold")
+            ax.set_ylabel(f"PC2 ({explained_var[1]*100:.1f}% variance)", fontsize=14, fontweight="bold")
+            ax.set_title("PCA Plot: Sample-Level Group Comparison", fontsize=16, fontweight="bold")
+            ax.legend(title="Group", fontsize=12, loc="best")
+            ax.grid(alpha=0.3, linestyle='--')
+            ax.tick_params(labelsize=12)
+            
+            plt.tight_layout()
+            
+            # Save plot
+            paths["results"].mkdir(parents=True, exist_ok=True)
+            output_path = paths["results"] / "pca_plot_groups_sample_level.png"
+            plt.savefig(output_path, dpi=300, bbox_inches="tight")
+            plt.close(fig)
+            
+            QMessageBox.information(
+                self,
+                "Success",
+                f"✅ PCA plot (sample-level) saved to:\n{output_path}\n\n"
+                f"PC1 explains {explained_var[0]*100:.1f}% of variance\n"
+                f"PC2 explains {explained_var[1]*100:.1f}% of variance\n\n"
+                f"Number of samples: {len(sample_df)}"
+            )
+        except Exception as e:
+            import traceback
+            QMessageBox.critical(self, "Error", f"❌ Error creating PCA plot: {str(e)}\n\n{traceback.format_exc()}")
     
     def show_documentation(self):
         """Show documentation in a dialog window."""

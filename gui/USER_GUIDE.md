@@ -51,23 +51,54 @@ The metadata table automatically shows all loaded files. Each row represents one
 You can scroll the table if you have many files. The table shows approximately 3 rows at a time.
 
 **CSV/Excel Upload:**
-For many files, it's easier to prepare a metadata file. Create a CSV or Excel file with these columns:
-- `file_name` (required): Must exactly match the .daf filename without the .daf extension
-- `sample_id` (optional): Unique sample identifier
-- `group` (recommended): Experimental group for coloring and statistics
-- `replicate` (optional): Replicate number
-- Any other columns: These can be used for coloring plots
+For many files, it's easier to prepare a metadata file externally and upload it.
+
+**Required Columns:**
+- `file_name` (REQUIRED): Must exactly match your .daf filename WITHOUT the .daf extension
+  - Example: If your file is `sample_001.daf`, use `sample_001` in the metadata
+
+**Optional Standard Columns:**
+- `sample_id`: Unique identifier (auto-generated from file_name if missing)
+- `group`: Experimental group for coloring and statistics (e.g., control, treated, timepoint_1)
+- `replicate`: Replicate number (e.g., 1, 2, 3)
+
+**Custom Columns:**
+You can add ANY additional columns you need. All columns will be available for:
+- Coloring plots in the visualization
+- Grouping and filtering data
+- Statistical comparisons
 
 Example CSV:
 ```csv
-file_name,sample_id,group,replicate
-sample_001,sample_001,control,1
-sample_002,sample_002,control,2
-sample_003,sample_003,treated,1
-sample_004,sample_004,treated,2
+file_name,group,replicate,treatment,timepoint,patient_id
+sample_001,control,1,untreated,0h,patient_A
+sample_002,control,2,untreated,0h,patient_A
+sample_003,treated,1,drug_X,24h,patient_B
+sample_004,treated,2,drug_X,24h,patient_B
 ```
 
-Click "Upload Metadata" to load the file. The table updates automatically.
+**File Format:**
+- Supported formats: `.csv`, `.xlsx`, `.xls`
+- Structure: Each row = one file, each column = one attribute
+- Encoding: UTF-8 recommended for CSV files
+
+**Validation:**
+When you upload metadata, the app checks:
+1. Is the `file_name` column present?
+2. Do the file names match your loaded DAF files?
+3. Are there any mismatches (typos, missing files)?
+
+If mismatches are found, you'll see a detailed report showing:
+- Which metadata entries have no matching DAF file
+- Which DAF files have no metadata entry
+- How many files match correctly
+
+**Mismatch Handling:**
+- Files that don't match will be EXCLUDED from analysis
+- Only cells from matched files will be used
+- You can choose to continue or cancel and fix the metadata first
+
+Click "Upload Metadata" to load your file. The table updates automatically.
 
 **Save:**
 Always click "Save Metadata" before starting analysis. The status indicator changes to "Saved" when successful. Metadata is saved to `bundle_runs/run_YYYYMMDD_HHMMSS/metadata/sample_sheet.csv`. If you don't save, the analysis may not use your metadata correctly.
@@ -75,6 +106,14 @@ Always click "Save Metadata" before starting analysis. The status indicator chan
 ### 4. Feature Selection
 
 Features are the measured parameters from your ImageStream data - fluorescence channels, morphological parameters, and other cell characteristics. Selecting the right features is crucial for meaningful analysis.
+
+**Import/Export Features:**
+You can save and load your feature selection as Excel files to easily reuse settings between runs:
+- **Export Features:** Click "📤 Export Features (Excel)" to save your current included/excluded features to an Excel file
+- **Import Features:** Click "📥 Import Features (Excel)" to load a previously saved feature selection
+- The Excel file contains two columns: "included" (selected features) and "excluded" (deselected features)
+- If features in the Excel file don't exist in the current data, you'll get a warning but valid features will still be imported
+- This is especially useful when iterating between runs with similar datasets
 
 **Include/Exclude Features:**
 - Blue chips represent included features (will be used in analysis)
@@ -279,6 +318,21 @@ This visualization helps you:
 
 The heatmap includes dendrograms showing hierarchical relationships between features (left) and clusters (top). It's saved as PNG (high resolution) and the underlying data is saved as CSV for further analysis.
 
+**Group-Cluster Bar Graphs:**
+Click "📊 Group-Cluster Bar Graphs" to create publication-quality bar graphs showing group differences within each cluster. This analysis:
+- Creates one graph per cluster
+- X-axis: Groups (from metadata)
+- Y-axis: Percentage of cells from each group that are in the cluster
+- Includes SEM error bars and individual data points (one per sample/replicate)
+- Shows statistical significance markers (*, **, ***) only for significant comparisons (p < 0.05)
+
+This visualization is essential for:
+- Comparing group frequencies within clusters
+- Identifying clusters that differ significantly between groups
+- Generating publication-ready figures with proper statistics
+
+Results are saved as `cluster_{cluster}_group_bar_graph.png` for each cluster in the results folder. The graphs use consistent formatting (14pt labels, 12pt ticks, 300 DPI) matching other plots in the application.
+
 **Feature Importance:**
 After dimensionality reduction, click "Feature Importance" to determine which features drive the X and Y dimensions of your embedding. This is important because:
 - It helps you understand what the dimensions represent biologically
@@ -296,6 +350,20 @@ This approach is much faster than calculating importance for all features with 1
 Results are saved as:
 - CSV: `top10_features.csv` with importance scores for X and Y dimensions
 - Plots: `top10_features_x.png` and `top10_features_y.png` showing bar charts of top 10 features
+
+**PCA Plot (Sample-Level):**
+Click "📈 PCA Plot (Sample-Level)" in the Visualization section to create a PCA plot showing group differences at the sample level. This analysis:
+- Calculates mean feature values per sample
+- Performs PCA on sample means (not individual cells)
+- Colors samples by their group assignment from metadata
+- Helps visualize whether groups are separated in feature space
+
+The plot shows PC1 vs PC2 with explained variance percentages. Each point represents one sample. This is useful for:
+- Validating that experimental groups are distinct
+- Identifying batch effects or outliers
+- Understanding overall group differences before detailed cluster analysis
+
+Results are saved as `pca_plot_groups_sample_level.png` in the results folder.
 
 The top 10 features for each dimension are the ones that Random Forest found most predictive of the X or Y coordinate, meaning they're driving the structure you see in the plot.
 

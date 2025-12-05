@@ -67,6 +67,9 @@ See [INSTALLATION.md](INSTALLATION.md) for detailed installation instructions.
 - Cluster-feature heatmap
 - Cluster statistics bar chart
 - Feature importance (two-stage approach)
+- Group-cluster bar graphs with statistics (SEM, significance markers)
+- PCA plot (sample-level, group comparison)
+- Feature import/export (Excel format)
 
 ## System Requirements
 
