@@ -6,6 +6,7 @@
 [badge-docs]: https://img.shields.io/readthedocs/morphomapping
  
 MorphoMapping is an analytical framework designed for the analysis of Imaging Flow Cytometry (IFC) data. It is based on our Python package, morphomapping, which provides tools for dimensionality reduction and clustering of IFC data. Step 2 and Step 4 can be considered optional.
+Further information: https://academic.oup.com/jimmunol/article-abstract/doi/10.1093/jimmun/vkag061/8654648?utm_source=authortollfreelink&utm_campaign=jimmunol&utm_medium=email
 
 # Description
 
